@@ -4,9 +4,9 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：スピン軸・初期姿勢完全再現")
+st.title("⚾ 投手分析：U字基準線・完全同期ビジュアライザー")
 
-uploaded_file = st.file_uploader("CSVファイルをアップロード", type='csv')
+uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file, skiprows=4)
@@ -21,23 +21,25 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_precise_spinning_ball(spin_dir_str):
-        # 1. 回転軸の計算 (Rapsodoの時計の針の方向に垂直な軸)
+    def create_final_baseball_model(spin_dir_str):
+        # 1. 時刻から回転角(theta)と自転軸(axis)を計算
         hour, minute = map(int, spin_dir_str.split(':'))
         total_min = (hour % 12) * 60 + minute
-        theta = (total_min / 720) * 2 * np.pi
+        theta = (total_min / 720) * 2 * np.pi  # 12:00 = 0, 3:00 = pi/2
         
-        # 軸：12:00のときX軸(水平)、3:00のときY軸(垂直)
-        axis = np.array([np.cos(theta), -np.sin(theta), 0])
+        # 自転軸：12:00は水平(X軸)、3:00は垂直(Z軸)
+        # 指示通り、3:00の時は垂直軸で画面奥(右)へ回転
+        axis = np.array([np.cos(theta), 0, np.sin(theta)])
 
-        # 2. 野球ボール曲線の生成 (U字構造)
+        # 2. 野球ボール曲線 (U字構造) の生成
         t = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
-        sx = np.cos(t) + alpha * np.cos(3*t)
-        sy = np.sin(t) - alpha * np.sin(3*t)
-        sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-        norm = np.sqrt(sx**2 + sy**2 + sz**2)
-        s_base = np.vstack([sx/norm, sy/norm, sz/norm])
+        # 二等分線が座標軸に合うように位相を調整
+        sx_raw = np.cos(t) + alpha * np.cos(3*t)
+        sy_raw = np.sin(t) - alpha * np.sin(3*t)
+        sz_raw = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+        norm = np.sqrt(sx_raw**2 + sy_raw**2 + sz_raw**2)
+        s_base = np.vstack([sx_raw/norm, sy_raw/norm, sz_raw/norm])
 
         # 108本のステッチ
         t_st = np.linspace(0, 2 * np.pi, 108)
@@ -47,49 +49,50 @@ if uploaded_file is not None:
         sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
-        # 3. 各時刻ごとの「初期姿勢」と「回転の向き」の定義
-        # ここで「12:00は左に膨らんだ⊂」など、指示通りの向きに固定
-        def get_pose_and_spin(ang):
-            # 12:00基準：U字が左に膨らむように基本姿勢を回転
-            # Y軸周りに90度、Z軸周りに90度などの調整
-            R_fix = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
-            # 時刻に合わせてボール自体の向きも連動させる
+        # 3. 初期姿勢の計算
+        # 12:00の時に「二等分線が地面と平行」かつ「左に膨らんだ⊂」の状態を作る
+        def get_initial_pose(ang):
+            # 基本姿勢：二等分線をX軸に向ける
+            R_fix = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])
+            # 時刻(ang)に合わせて、二等分線自体を水平(12:00)から垂直(3:00)へ回転
+            # Y軸(奥行き方向)を中心に回転させることで、正面から見て傾く
             c, s = np.cos(ang), np.sin(ang)
-            Rz = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
-            return Rz @ R_fix
+            Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+            return Ry @ R_fix
 
-        R_init = get_pose_and_spin(theta)
+        R_init = get_initial_pose(theta)
         s_oriented = R_init @ s_base
         st_oriented = R_init @ st_base
 
-        # 4. 回転アニメーションの計算
+        # 4. 回転シミュレーション
         u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:40j]
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
-        ball_base = np.vstack([bx.flatten(), by.flatten(), bz.flatten()])
+        ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()])
 
-        def rotate_matrix(pts, ax, a):
+        def rotate_vecs(pts, ax, a):
             ax = ax / np.linalg.norm(ax)
             c, s = np.cos(a), np.sin(a)
-            # 12:00で「手前に回転」させるために回転角の符号を調整
             K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
-            R = np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * (K @ K)
+            R = np.eye(3) + s * K + (1 - c) * (K @ K)
             return R @ pts
 
         frames = []
         for i in range(30):
-            # 回転の進み（バックスピンならプラス方向）
+            # 回転角
             angle = (i / 30) * (2 * np.pi)
-            r_ball = rotate_matrix(ball_base, axis, angle)
-            r_st_center = rotate_matrix(st_oriented, axis, angle)
+            r_ball = rotate_vecs(ball_mesh, axis, angle)
+            r_st_center = rotate_vecs(st_oriented, axis, angle)
             
-            # ステッチの描画
-            off = 0.05
+            # ステッチの厚みとV字・H字表現
             rx, ry, rz = [], [], []
+            off = 0.05
             for j in range(108):
                 p = r_st_center[:, j]
-                # 側面の平行線を出すためのサイドベクトル（軸方向に依存）
-                side = np.array([-p[1], p[0], 0.1]) 
+                # 軸に合わせた側面への広がり
+                side = np.cross(p, axis)
+                if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
                 side /= np.linalg.norm(side)
+                
                 p_l, p_r = p * 1.01 + side * off, p * 1.01 - side * off
                 rx.extend([p_l[0], p_r[0], None])
                 ry.extend([p_l[1], p_r[1], None])
@@ -109,16 +112,16 @@ if uploaded_file is not None:
                 updatemenus=[{
                     "type": "buttons", "showactive": False,
                     "buttons": [{"label": "Play", "method": "animate", 
-                                 "args": [None, {"frame": {"duration": 30, "redraw": True}, "fromcurrent": True, "loop": True}]}]
+                                 "args": [None, {"frame": {"duration": 33, "redraw": True}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"【{p_type}】 {spin_str}方向のスピン再現",
+                title=f"【{p_type}】 {spin_str} (二等分線同期モデル)",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_precise_spinning_ball(spin_str), use_container_width=True)
+    st.plotly_chart(create_final_baseball_model(spin_str), use_container_width=True)
 
     # 自動再生
     st.components.v1.html(
@@ -129,6 +132,9 @@ if uploaded_file is not None:
         }, 100);
         </script>""", height=0
     )
+
+    st.subheader("📊 解析データ概要")
+    st.dataframe(df.groupby('Pitch Type')[['Velocity', 'Total Spin']].agg(['mean', 'max']).dropna().round(1))
 
 else:
     st.info("CSVファイルをアップロードしてください。")
