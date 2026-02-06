@@ -1,110 +1,126 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import numpy as np
+import plotly.graph_objects as go
 
-# --- ページ設定 ---
 st.set_page_config(layout="wide")
-st.title("⚾ リアル・ピッチ・ビジュアライザー")
+st.title("⚾ Rapsodo Pitch Visualizer Pro")
 
-uploaded_file = st.file_uploader("CSVファイルをアップロード", type='csv')
+uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # データクリーニング（統計用）
-    for col in ['Velocity', 'Total Spin', 'VB (trajectory)', 'HB (trajectory)']:
+    # データ処理（統計用）
+    numeric_cols = ['Velocity', 'Total Spin', 'VB (trajectory)', 'HB (trajectory)']
+    for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # 1. 統計表示 (数値があるもののみ)
+    # --- 球種別統計（データがあるもののみ） ---
     st.subheader("📊 球種別統計")
-    stats = df.groupby('Pitch Type')[['Velocity', 'Total Spin']].agg(['mean', 'max']).dropna().round(1)
+    stats = df.groupby('Pitch Type')[['Velocity', 'Total Spin']].agg(['mean', 'max']).dropna()
     stats.columns = ['平均球速', '最高球速', '平均回転数', '最高回転数']
-    st.dataframe(stats)
+    st.dataframe(stats.round(1))
 
-    # 2. 変化量チャート (白背景)
-    st.subheader("⚾ 変化量チャート")
+    # --- 変化量チャート（白背景） ---
+    st.subheader("⚾ 変化量チャート (Movement Profile)")
     import plotly.express as px
     fig_mov = px.scatter(df.dropna(subset=['HB (trajectory)', 'VB (trajectory)']), 
                          x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
                          template="plotly_white", range_x=[-60, 60], range_y=[-60, 60])
-    fig_mov.add_shape(type="line", x0=-60, y0=0, x1=60, y1=0, line=dict(color="gray", dash="dash"))
-    fig_mov.add_shape(type="line", x0=0, y0=-60, x1=0, y1=60, line=dict(color="gray", dash="dash"))
+    fig_mov.add_vline(x=0, line_color="lightgray")
+    fig_mov.add_hline(y=0, line_color="lightgray")
     st.plotly_chart(fig_mov)
 
-    # 3. リアルな回転軸アニメーション
+    # --- 3. リアルな回転アニメーション ---
     st.subheader("🔄 リアル回転シミュレーション (最新の1球)")
     
-    # 最新のデータを取得
-    row = df.dropna(subset=['Spin Direction']).iloc[0]
-    spin_dir = row['Spin Direction']
-    pitch_type = row['Pitch Type']
+    # 有効な最新データを取得
+    valid_row = df.dropna(subset=['Spin Direction']).iloc[0]
+    spin_dir_str = valid_row['Spin Direction']
+    pitch_type = valid_row['Pitch Type']
 
-    # --- ボールの3Dモデル作成 ---
-    def create_animated_ball(spin_str):
-        # 12:00形式を角度に変換
+    def create_realistic_ball_animation(spin_str):
+        # 1. Spin Direction (時刻) を角度に変換
+        # 12:00 = 0度, 3:00 = 90度 (投手視点)
         hour, minute = map(int, spin_str.split(':'))
-        # ラプソードの定義: 12:00はバックスピン(軸は水平)
-        # 進行方向から見て、時計の針の方向にボールが「浮き上がる力」が働いていると定義
-        angle_deg = (hour % 12 + minute / 60) * 30
-        angle_rad = np.deg2rad(angle_deg)
-        
-        # 球体のメッシュ作成
-        n = 30
-        u = np.linspace(0, 2 * np.pi, n)
-        v = np.linspace(0, np.pi, n)
-        x = np.outer(np.cos(u), np.sin(v))
-        y = np.outer(np.sin(u), np.sin(v))
-        z = np.outer(np.ones(np.size(u)), np.cos(v))
+        tilt_deg = (hour % 12 + minute / 60) * 30
+        tilt_rad = np.deg2rad(tilt_deg)
 
-        # 野球ボールのテクスチャ（外部のフリー素材URLを使用）
-        # ※インターネット環境が必要です
-        ball_texture = "https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg" # 代替用。実際は野球ボール画像を推奨
-        # リアルな野球ボールスキンURL
-        ball_skin = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/Baseball_template_clean_2.jpg/1024px-Baseball_template_clean_2.jpg"
+        # ラプソードの定義に基づき、揚力方向(tilt_rad)に直交する回転軸を算出
+        # 軸ベクトル: [cos, 0, -sin] 
+        axis = np.array([np.cos(tilt_rad), 0, -np.sin(tilt_rad)])
 
-        fig = go.Figure()
+        # 2. ボールのメッシュ (球体)
+        phi = np.linspace(0, 2*np.pi, 30)
+        theta = np.linspace(0, np.pi, 30)
+        x = np.outer(np.cos(phi), np.sin(theta))
+        y = np.outer(np.sin(phi), np.sin(theta))
+        z = np.outer(np.ones(np.size(phi)), np.cos(theta))
 
-        # アニメーションのフレーム作成 (回転させる)
+        # 3. 野球の「縫い目」の数式 (8の字曲線)
+        t = np.linspace(0, 2*np.pi, 200)
+        # 野球ボールの縫い目を近似する球面上の軌跡
+        seam_x = 1.01 * (np.cos(t) - 0.2 * np.cos(3*t))
+        seam_y = 1.01 * (np.sin(t) + 0.2 * np.sin(3*t))
+        seam_z = 1.01 * (0.6 * np.sin(2*t))
+        seams = np.vstack([seam_x, seam_y, seam_z])
+
+        # 4. アニメーションフレームの作成
         frames = []
-        for t in range(0, 20):
-            rot = t * 0.3 # 回転速度
-            # 回転行列を適用（スピン軸を中心に回転）
-            # 簡易化のため、Z軸（スピン方向）周りの回転としてシミュレート
-            frames.append(go.Frame(data=[go.Surface(
-                x=x*np.cos(rot) - y*np.sin(rot),
-                y=x*np.sin(rot) + y*np.cos(rot),
-                z=z,
-                surfacecolor=np.random.rand(n, n), # 擬似的なテクスチャ感
-                colorscale=[[0, 'white'], [0.5, 'red'], [1, 'white']], # 縫い目イメージ
-                showscale=False
-            )]))
+        num_frames = 24
+        for i in range(num_frames):
+            angle = (i / num_frames) * (2 * np.pi)
+            
+            # ロドリゲスの回転公式で縫い目と球体を回転させる
+            def rotate_points(pts, axis, a):
+                # 軸周りの回転行列
+                axis = axis / np.linalg.norm(axis)
+                c, s = np.cos(a), np.sin(a)
+                K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+                R = np.eye(3) + s * K + (1 - c) * np.dot(K, K)
+                return np.dot(R, pts)
 
-        # ベースとなる球体
-        fig.add_trace(go.Surface(x=x, y=y, z=z, 
-                                 colorscale=[[0, 'white'], [1, '#dddddd']], 
-                                 showscale=False))
+            # 縫い目を回転
+            rotated_seams = rotate_points(seams, axis, angle)
+            
+            # 球体のメッシュを回転
+            pts = np.vstack([x.flatten(), y.flatten(), z.flatten()])
+            rotated_pts = rotate_points(pts, axis, angle)
+            rx = rotated_pts[0].reshape(x.shape)
+            ry = rotated_pts[1].reshape(y.shape)
+            rz = rotated_pts[2].reshape(z.shape)
 
-        # 回転軸を示すロッド (固定)
-        axis_len = 1.5
-        ax = np.sin(angle_rad) * axis_len
-        az = np.cos(angle_rad) * axis_len
-        fig.add_trace(go.Scatter3d(x=[-ax, ax], y=[0, 0], z=[-az, az],
-                                 mode='lines', line=dict(color='black', width=10)))
+            frames.append(go.Frame(data=[
+                go.Surface(x=rx, y=ry, z=rz, colorscale=[[0, 'white'], [1, '#fdfdfd']], showscale=False),
+                go.Scatter3d(x=rotated_seams[0], y=rotated_seams[1], z=rotated_seams[2], 
+                             mode='lines', line=dict(color='red', width=6))
+            ], name=f'fr{i}'))
 
-        fig.update_layout(
-            scene=dict(
-                xaxis_visible=False, yaxis_visible=False, zaxis_visible=False,
-                aspectmode='cube',
-                camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+        # 5. 基本表示
+        fig = go.Figure(
+            data=[
+                go.Surface(x=x, y=y, z=z, colorscale=[[0, 'white'], [1, '#fdfdfd']], showscale=False, opacity=0.9),
+                go.Scatter3d(x=seams[0], y=seams[1], z=seams[2], mode='lines', line=dict(color='red', width=6))
+            ],
+            layout=go.Layout(
+                scene=dict(
+                    xaxis_visible=False, yaxis_visible=False, zaxis_visible=False,
+                    aspectmode='cube',
+                    camera=dict(eye=dict(x=1.2, y=-1.2, z=1.2)) # 投手斜め後ろからの視点
+                ),
+                updatemenus=[{
+                    "type": "buttons",
+                    "buttons": [{"label": "回転開始", "method": "animate", "args": [None, {"frame": {"duration": 40, "redraw": True}, "fromcurrent": True, "mode": "immediate", "loop": True}]}]
+                }]
             ),
-            updatemenus=[dict(type="buttons", buttons=[dict(label="Play Spin", method="animate", args=[None, {"frame": {"duration": 50}}])])]
+            frames=frames
         )
-        fig.frames = frames
         return fig
 
-    st.plotly_chart(create_animated_ball(spin_dir))
-    st.info(f"このボールは {pitch_type} の回転軸 ({spin_dir}) を中心に回転しています。Playボタンを押してください。")
+    st.plotly_chart(create_realistic_ball_animation(spin_dir_str))
+    st.write(f"**球種**: {pitch_type} | **Spin Direction**: {spin_dir_str}")
+    st.info("「回転開始」ボタンを押すと、ラプソードの定義に基づいた回転軸（揚力方向に対して垂直）を中心にリアルな縫い目が回転します。")
 
 else:
     st.info("CSVファイルをアップロードしてください。")
