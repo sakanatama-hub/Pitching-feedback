@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：構造再現スピンビジュアライザー")
+st.title("⚾ 投手分析：リアル・スピン・ビジュアライザー")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -22,58 +22,56 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_structural_baseball(spin_dir_str):
-        # 1. Rapsodo回転軸の計算
+    def create_dynamic_baseball(spin_dir_str):
+        # 1. 回転軸と傾きの計算
+        # Rapsodoの時計盤：12:00は0度, 3:00は90度
         hour, minute = map(int, spin_dir_str.split(':'))
-        tilt_rad = np.deg2rad((hour % 12 + minute / 60) * 30)
+        tilt_deg = (hour % 12 + minute / 60) * 30
+        tilt_rad = np.deg2rad(tilt_deg)
+        
+        # 回転軸（軸そのものが時計の針のように傾く）
+        # 12:00の時、軸は水平(X軸)
         axis = np.array([np.cos(tilt_rad), 0, -np.sin(tilt_rad)])
 
-        # 2. 幾何学的に正しい「野球ボール曲線」の生成
-        # 表裏のU字と側面の平行線（Hの形）を再現する数式
+        # 2. 野球ボール曲線の生成 (U字構造)
         t = np.linspace(0, 2 * np.pi, 200)
-        # alphaがパネルの「食い込み」を決定
         alpha = 0.4 
         
-        # 本物の野球ボールの縫い目の軌跡（球面上の構造線）
-        sx = np.cos(t) + alpha * np.cos(3*t)
-        sy = np.sin(t) - alpha * np.sin(3*t)
-        sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+        # 12:00の時に「U字の膨らみが左」に見えるように初期位相を調整
+        # 媒介変数の位相を +np.pi/2 ずらす
+        t_adj = t + np.pi/2
         
-        # 半径を1に正規化
-        norm = np.sqrt(sx**2 + sy**2 + sz**2)
-        sx, sy, sz = sx/norm, sy/norm, sz/norm
+        sx_raw = np.cos(t_adj) + alpha * np.cos(3*t_adj)
+        sy_raw = np.sin(t_adj) - alpha * np.sin(3*t_adj)
+        sz_raw = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_adj)
         
-        # 3. 108本のステッチを構造線に沿って配置
-        # 縫い目は中央の溝を挟んで左右に並行して走る
-        t_stitch = np.linspace(0, 2 * np.pi, 108)
-        # 再計算して正規化
-        ssx = (np.cos(t_stitch) + alpha * np.cos(3*t_stitch))
-        ssy = (np.sin(t_stitch) - alpha * np.sin(3*t_stitch))
-        ssz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_stitch)
-        snorm = np.sqrt(ssx**2 + ssy**2 + ssz**2)
-        ssx, ssy, ssz = ssx/snorm, ssy/snorm, ssz/snorm
+        # 正規化
+        norm = np.sqrt(sx_raw**2 + sy_raw**2 + sz_raw**2)
+        sx, sy, sz = sx_raw/norm, sy_raw/norm, sz_raw/norm
 
-        # 溝を表現するための左右のオフセット
-        off = 0.04
+        # 3. ステッチの生成 (太さを出すためにオフセット)
+        t_stitch = np.linspace(0, 2 * np.pi, 108) + np.pi/2
+        ssx_r = (np.cos(t_stitch) + alpha * np.cos(3*t_stitch))
+        ssy_r = (np.sin(t_stitch) - alpha * np.sin(3*t_stitch))
+        ssz_r = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_stitch)
+        snorm = np.sqrt(ssx_r**2 + ssy_r**2 + ssz_r**2)
+        ssx, ssy, ssz = ssx_r/snorm, ssy_r/snorm, ssz_r/snorm
+
         stitches_x, stitches_y, stitches_z = [], [], []
+        off = 0.045 # ステッチの幅をわずかに広げる
         
         for i in range(108):
             p = np.array([ssx[i], ssy[i], ssz[i]])
-            # 法線方向
             n = p / np.linalg.norm(p)
-            # 接線方向
             tang = np.array([-ssy[i], ssx[i], 0])
             if np.linalg.norm(tang) < 0.1: tang = np.array([0, 1, 0])
             side = np.cross(n, tang)
             side /= np.linalg.norm(side)
             
-            # ステッチの左右の点を「U字」の溝として結ぶ
-            p_left = p * 1.01 + side * off
-            p_right = p * 1.01 - side * off
-            
-            stitches_x.extend([p_left[0], p_right[0], None])
-            stitches_y.extend([p_left[1], p_right[1], None])
-            stitches_z.extend([p_left[2], p_right[2], None])
+            p_l, p_r = p * 1.01 + side * off, p * 1.01 - side * off
+            stitches_x.extend([p_l[0], p_r[0], None])
+            stitches_y.extend([p_l[1], p_r[1], None])
+            stitches_z.extend([p_l[2], p_r[2], None])
 
         # 球体メッシュ
         u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:40j]
@@ -92,14 +90,10 @@ if uploaded_file is not None:
             angle = (i / 30) * (2 * np.pi)
             r_ball = rotate(np.vstack([bx.flatten(), by.flatten(), bz.flatten()]), axis, angle)
             
-            # ステッチの回転処理（Noneを避けるため個別に計算）
             s_pts = np.vstack([stitches_x, stitches_y, stitches_z])
-            # None以外のインデックスを取得
             mask = ~np.isnan(np.array(stitches_x, dtype=float))
-            valid_pts = s_pts[:, mask]
-            r_valid = rotate(valid_pts, axis, angle)
+            r_valid = rotate(s_pts[:, mask], axis, angle)
             
-            # 元の構造（None入り）に戻す
             rx, ry, rz = [], [], []
             ptr = 0
             for val in stitches_x:
@@ -112,14 +106,15 @@ if uploaded_file is not None:
             frames.append(go.Frame(data=[
                 go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape),
                            colorscale=[[0, '#FDFDFD'], [1, '#EAEAEA']], showscale=False),
-                go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='#BC1010', width=6))
+                # 縫い目の線を太く (width=10)
+                go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='#BC1010', width=10))
             ], name=f'f{i}'))
 
         fig = go.Figure(
             data=frames[0].data,
             layout=go.Layout(
                 scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False, aspectmode='cube',
-                           camera=dict(eye=dict(x=1.3, y=-1.3, z=0.8))),
+                           camera=dict(eye=dict(x=0, y=-1.8, z=0))), # 真後ろ（投手視点）から固定
                 updatemenus=[{
                     "type": "buttons", "showactive": False,
                     "buttons": [{"label": "Play", "method": "animate", 
@@ -132,9 +127,9 @@ if uploaded_file is not None:
         )
         return fig
 
-    st.plotly_chart(create_structural_baseball(spin_str), use_container_width=True)
+    st.plotly_chart(create_dynamic_baseball(spin_str), use_container_width=True)
 
-    # 自動再生
+    # 自動再生JS
     st.components.v1.html(
         """<script>
         var itv = setInterval(function() {
@@ -145,7 +140,7 @@ if uploaded_file is not None:
     )
 
     # 統計
-    st.subheader("📊 解析データ概要")
+    st.subheader("📊 統計データ")
     st.dataframe(df.groupby('Pitch Type')[['Velocity', 'Total Spin']].agg(['mean', 'max']).dropna().round(1))
 
 else:
