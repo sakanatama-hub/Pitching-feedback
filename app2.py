@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：U字基準線・完全同期ビジュアライザー")
+st.title("⚾ 投手分析：リアル・スピン・ダイナミクス")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -21,20 +21,19 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_final_baseball_model(spin_dir_str):
-        # 1. 時刻から回転角(theta)と自転軸(axis)を計算
+    def create_master_baseball_model(spin_dir_str):
+        # 1. Rapsodo時刻から角度と回転軸を算出
         hour, minute = map(int, spin_dir_str.split(':'))
         total_min = (hour % 12) * 60 + minute
         theta = (total_min / 720) * 2 * np.pi  # 12:00 = 0, 3:00 = pi/2
         
         # 自転軸：12:00は水平(X軸)、3:00は垂直(Z軸)
-        # 指示通り、3:00の時は垂直軸で画面奥(右)へ回転
         axis = np.array([np.cos(theta), 0, np.sin(theta)])
 
-        # 2. 野球ボール曲線 (U字構造) の生成
+        # 2. 野球ボール曲線 (U字構造)
         t = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
-        # 二等分線が座標軸に合うように位相を調整
+        # U字の二等分線を基準にした基本数式
         sx_raw = np.cos(t) + alpha * np.cos(3*t)
         sy_raw = np.sin(t) - alpha * np.sin(3*t)
         sz_raw = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
@@ -49,13 +48,17 @@ if uploaded_file is not None:
         sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
-        # 3. 初期姿勢の計算
-        # 12:00の時に「二等分線が地面と平行」かつ「左に膨らんだ⊂」の状態を作る
+        # 3. 【重要】初期姿勢の厳密な定義
         def get_initial_pose(ang):
-            # 基本姿勢：二等分線をX軸に向ける
-            R_fix = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])
-            # 時刻(ang)に合わせて、二等分線自体を水平(12:00)から垂直(3:00)へ回転
-            # Y軸(奥行き方向)を中心に回転させることで、正面から見て傾く
+            # 12:00の時、二等分線を水平、かつ左膨らみ(⊂)に固定する行列
+            # ボールをX軸回りに90度、Z軸回りに90度回転させて位置を合わせる
+            R_fix = np.array([
+                [0, 1, 0],
+                [0, 0, 1],
+                [1, 0, 0]
+            ])
+            # 時刻(ang)に合わせて、二等分線が時計回りに傾くように回転
+            # Y軸(奥行き)周りに回転させることで、正面から見て傾く
             c, s = np.cos(ang), np.sin(ang)
             Ry = np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
             return Ry @ R_fix
@@ -64,7 +67,7 @@ if uploaded_file is not None:
         s_oriented = R_init @ s_base
         st_oriented = R_init @ st_base
 
-        # 4. 回転シミュレーション
+        # 4. 球体メッシュと回転計算
         u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:40j]
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
         ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()])
@@ -73,22 +76,23 @@ if uploaded_file is not None:
             ax = ax / np.linalg.norm(ax)
             c, s = np.cos(a), np.sin(a)
             K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
+            # ロドリゲスの回転公式
             R = np.eye(3) + s * K + (1 - c) * (K @ K)
             return R @ pts
 
         frames = []
         for i in range(30):
-            # 回転角
+            # 回転角（12:00は手前に回るバックスピン）
             angle = (i / 30) * (2 * np.pi)
             r_ball = rotate_vecs(ball_mesh, axis, angle)
             r_st_center = rotate_vecs(st_oriented, axis, angle)
             
-            # ステッチの厚みとV字・H字表現
+            # ステッチの厚みと視認性の向上
             rx, ry, rz = [], [], []
             off = 0.05
             for j in range(108):
                 p = r_st_center[:, j]
-                # 軸に合わせた側面への広がり
+                # 側面方向へのオフセット
                 side = np.cross(p, axis)
                 if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
                 side /= np.linalg.norm(side)
@@ -100,7 +104,7 @@ if uploaded_file is not None:
 
             frames.append(go.Frame(data=[
                 go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape),
-                           colorscale=[[0, '#FFFFFF'], [1, '#EAEAEA']], showscale=False),
+                           colorscale=[[0, '#FDFDFD'], [1, '#EAEAEA']], showscale=False),
                 go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='#BC1010', width=12))
             ], name=f'f{i}'))
 
@@ -112,18 +116,18 @@ if uploaded_file is not None:
                 updatemenus=[{
                     "type": "buttons", "showactive": False,
                     "buttons": [{"label": "Play", "method": "animate", 
-                                 "args": [None, {"frame": {"duration": 33, "redraw": True}, "fromcurrent": True, "loop": True}]}]
+                                 "args": [None, {"frame": {"duration": 30, "redraw": True}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"【{p_type}】 {spin_str} (二等分線同期モデル)",
+                title=f"球種: {p_type} | 時刻: {spin_str}",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_final_baseball_model(spin_str), use_container_width=True)
+    st.plotly_chart(create_master_baseball_model(spin_str), use_container_width=True)
 
-    # 自動再生
+    # 自動再生JS
     st.components.v1.html(
         """<script>
         var itv = setInterval(function() {
