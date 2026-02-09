@@ -26,8 +26,6 @@ if uploaded_file is not None:
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # --- レイアウト：上段に統計、中段にグラフ、下段に回転 ---
-    
     # 2. 統計テーブル
     if 'Pitch Type' in df.columns and len(existing_cols) > 0:
         st.subheader("📊 球種別データサマリー (最大 & 平均)")
@@ -41,12 +39,11 @@ if uploaded_file is not None:
         stats_df.columns = ['球種'] + new_columns
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-    # 3. 変化量グラフ (散布図)
+    # 3. 変化量グラフ
     if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
         st.divider()
         st.subheader("📈 変化量マップ (ムーブメントチャート)")
         
-        # 散布図の作成
         fig_map = px.scatter(
             df, 
             x='HB (trajectory)', 
@@ -54,27 +51,24 @@ if uploaded_file is not None:
             color='Pitch Type',
             hover_data=['Velocity', 'Total Spin'],
             labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'},
-            title="捕手視点での変化量（中央が原点）"
         )
         
-        # グラフのデザイン調整（原点を通る十字線を追加）
+        # 十字線と範囲の設定
         fig_map.update_layout(
             xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', range=[-60, 60]),
             yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', range=[-60, 60]),
-            width=800,
-            height=600,
-            template="plotly_white"
+            template="plotly_white",
+            height=600
         )
-        # 捕手視点に合わせる（右投げの場合、シュート成分が右、スライダー成分が左）
         st.plotly_chart(fig_map, use_container_width=True)
+        
 
     # 4. スピンビジュアライザー
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         st.divider()
-        
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
+        
         if not valid_data.empty:
-            # 球種選択
             available_types = sorted(valid_data['Pitch Type'].unique()) if 'Pitch Type' in df.columns else []
             if available_types:
                 selected_type = st.selectbox("シミュレーションする球種を選択:", available_types)
@@ -94,30 +88,13 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転軸", f"{spin_str} 方向")
 
-            # --- JavaScript描画 (省略せず保持) ---
-            try:
-                hour, minute = map(int, spin_str.split(':'))
-                total_min = (hour % 12) * 60 + minute
-                theta = (total_min / 720) * 2 * np.pi 
-                axis = [float(np.cos(theta)), 0.0, float(-np.sin(theta))]
-            except:
-                axis = [1.0, 0.0, 0.0]
-
-            t_st = np.linspace(0, 2 * np.pi, 200)
-            alpha = 0.4
-            sx = np.cos(t_st) + alpha * np.cos(3*t_st)
-            sy = np.sin(t_st) - alpha * np.sin(3*t_st)
-            sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-            norm = np.sqrt(sx**2 + sy**2 + sz**2)
-            pts = np.vstack([sz/norm, sx/norm, sy/norm]).T 
-            seam_points = pts.tolist()
-
+            # JavaScript (f-string内なので {} は {{}} にエスケープ済み)
             html_code = f"""
             <div id="chart" style="width:100%; height:550px;"></div>
             <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
             <script>
-                var seam_base = {json.dumps(seam_points)};
-                var axis = {json.dumps(axis)};
+                var seam_base = {json.dumps(pts.tolist() if 'pts' in locals() else [])}; 
+                var axis = {json.dumps([float(np.cos(((int(spin_str.split(':')[0])%12)*60 + int(spin_str.split(':')[1]))/720*2*np.pi)), 0.0, float(-np.sin(((int(spin_str.split(':')[0])%12)*60 + int(spin_str.split(':')[1]))/720*2*np.pi))])};
                 var rpm = {rpm};
                 var angle = 0;
 
@@ -141,7 +118,7 @@ if uploaded_file is not None:
                 }}
 
                 var data = [
-                    {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']], showscale: false, opacity: 1.0 }},
+                    {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']], showscale: false, opacity: 1.0, lighting: {{ambient: 0.85, diffuse: 0.45, specular: 0.05, roughness: 1.0}} }},
                     {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }}
                 ];
 
@@ -163,7 +140,7 @@ if uploaded_file is not None:
                     }}
                     Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                     requestAnimationFrame(update);
-                }
+                }}
                 update();
             </script>
             """
