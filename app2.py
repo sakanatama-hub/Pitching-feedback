@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：リアルタイム・スピン解析")
+st.title("⚾ 投手分析：リアル・スピン・ダイナミクス")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -22,107 +22,106 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_pure_spin_model(spin_dir_str, rpm):
+    def create_working_spin_model(spin_dir_str, rpm):
         # 1. 回転軸の計算
         hour, minute = map(int, spin_dir_str.split(':'))
         total_min = (hour % 12) * 60 + minute
         theta = (total_min / 720) * 2 * np.pi 
-        # 進行方向へ吸い込まれるスライス軸
+        # 指定方向に垂直な軸（奥向き順回転用）
         axis = np.array([np.cos(theta), 0, -np.sin(theta)])
 
-        # 2. 形状生成
-        t = np.linspace(0, 2 * np.pi, 200)
-        alpha = 0.4
-        sx = np.cos(t) + alpha * np.cos(3*t)
-        sy = np.sin(t) - alpha * np.sin(3*t)
-        sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-        norm = np.sqrt(sx**2 + sy**2 + sz**2)
-        s_base = np.vstack([sx/norm, sy/norm, sz/norm])
-
+        # 2. ボールと縫い目の基本形状
         t_st = np.linspace(0, 2 * np.pi, 108)
-        ssx = np.cos(t_st) + alpha * np.cos(3*t_st)
-        ssy = np.sin(t_st) - alpha * np.sin(3*t_st)
-        ssz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-        sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
-        st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
+        alpha = 0.4
+        def get_seam_pts(t_arr):
+            sx = np.cos(t_arr) + alpha * np.cos(3*t_arr)
+            sy = np.sin(t_arr) - alpha * np.sin(3*t_arr)
+            sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_arr)
+            norm = np.sqrt(sx**2 + sy**2 + sz**2)
+            return np.vstack([sx/norm, sy/norm, sz/norm])
 
-        # 初期姿勢：左に膨らんだU
+        st_base = get_seam_pts(t_st)
         R_init = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
         st_oriented = R_init @ st_base
 
-        # 3. アニメーション設定 (60FPS)
-        fps = 60
-        num_frames = 60
-        angle_step = (rpm / 60) * (2 * np.pi) / fps
-
-        u, v = np.mgrid[0:2*np.pi:25j, 0:np.pi:25j] # メッシュを少し軽くして滑らかさ優先
+        # 球体メッシュ（軽量化）
+        u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:20j]
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
-        ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()]).astype(np.float64)
+        ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()])
 
-        def rotate_vecs(pts, ax, a):
+        # 回転関数
+        def rotate_pts(pts, ax, a):
             ax = ax / (np.linalg.norm(ax) + 1e-9)
             c, s = np.cos(a), np.sin(a)
             K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
             R = np.eye(3) + s * K + (1 - c) * (K @ K)
             return R @ pts
 
+        # アニメーション設定
+        fps = 60
+        num_frames = 60
+        angle_step = (rpm / 60) * (2 * np.pi) / fps
+
         frames = []
         for i in range(num_frames):
             angle = i * angle_step
-            r_ball = rotate_vecs(ball_mesh, axis, angle)
-            r_st_center = rotate_vecs(st_oriented, axis, angle)
+            r_ball = rotate_pts(ball_mesh, axis, angle)
+            r_seam = rotate_pts(st_oriented, axis, angle)
             
+            # 縫い目の描画データ生成
             rx, ry, rz = [], [], []
-            off = 0.05
+            off = 0.04
             for j in range(108):
-                p = r_st_center[:, j]
+                p = r_seam[:, j]
                 side = np.cross(p, axis)
                 if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
-                side = side / np.linalg.norm(side)
-                p_l = p * 1.01 + side * off
-                p_r = p * 1.01 - side * off
-                rx.extend([float(p_l[0]), float(p_r[0]), None])
-                ry.extend([float(p_l[1]), float(p_r[1]), None])
-                rz.extend([float(p_l[2]), float(p_r[2]), None])
+                side = (side / np.linalg.norm(side)) * off
+                p_l, p_r = p * 1.01 + side, p * 1.01 - side
+                rx.extend([p_l[0], p_r[0], None]); ry.extend([p_l[1], p_r[1], None]); rz.extend([p_l[2], p_r[2], None])
 
-            frames.append(go.Frame(data=[
-                go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape),
-                           colorscale=[[0, 'white'], [1, 'white']], showscale=False), # シンプルな白に固定
-                go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='#BC1010', width=12))
-            ], name=f'f{i}'))
+            # 各フレームのデータ定義（Surfaceを0番目、Scatter3dを1番目に固定）
+            frames.append(go.Frame(
+                data=[
+                    go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape),
+                               colorscale=[[0, 'white'], [1, 'white']], showscale=False, opacity=1.0),
+                    go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='red', width=10))
+                ],
+                name=f'f{i}'
+            ))
 
+        # ベースとなるグラフ（最初のフレーム）
         fig = go.Figure(
             data=frames[0].data,
             layout=go.Layout(
-                scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False, aspectmode='cube',
-                           camera=dict(eye=dict(x=0, y=-1.8, z=0))),
+                scene=dict(
+                    xaxis=dict(visible=False, range=[-1, 1]),
+                    yaxis=dict(visible=False, range=[-1, 1]),
+                    zaxis=dict(visible=False, range=[-1, 1]),
+                    aspectmode='cube',
+                    camera=dict(eye=dict(x=0, y=-1.8, z=0))
+                ),
                 updatemenus=[{
                     "type": "buttons", "showactive": False,
                     "buttons": [{"label": "Play", "method": "animate", 
                                  "args": [None, {"frame": {"duration": 1000/fps, "redraw": False}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"{p_type} | {spin_str} | {int(rpm)} rpm",
-                margin=dict(l=0, r=0, b=0, t=50)
+                title=f"【{p_type}】 {spin_str} | {int(rpm)} rpm",
+                margin=dict(l=0, r=0, b=0, t=40)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_pure_spin_model(spin_str, total_spin), use_container_width=True)
+    st.plotly_chart(create_working_spin_model(spin_str, total_spin), use_container_width=True)
 
-    # 強制自動再生JS
+    # 自動再生JS
     st.components.v1.html(
         """
         <script>
-        var checkExist = setInterval(function() {
-           var buttons = window.parent.document.querySelectorAll('button');
-           buttons.forEach(function(btn) {
-               if(btn.innerText === "Play") {
-                   btn.click();
-                   clearInterval(checkExist);
-               }
-           });
-        }, 100);
+        var itv = setInterval(function() {
+            var btns = window.parent.document.querySelectorAll('button');
+            btns.forEach(function(b) { if (b.innerText === 'Play') { b.click(); clearInterval(itv); } });
+        }, 200);
         </script>
         """, height=0
     )
