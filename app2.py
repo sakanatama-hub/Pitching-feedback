@@ -4,26 +4,57 @@ import numpy as np
 import json
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：超低速（0.05倍速）スピン解析")
+st.title("⚾ 投手分析：統計データ解析 & スピンビジュアライザー")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
+    # 1. データ読み込みと前処理
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    for col in ['Velocity', 'Total Spin']:
+    # 解析対象の列を数値型に変換
+    target_cols = ['Velocity', 'Total Spin', 'Spin Efficiency', 'VB (trajectory)', 'HB (trajectory)']
+    for col in target_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
+    # 2. 球種ごとの統計テーブル作成
+    if 'Pitch Type' in df.columns:
+        st.subheader("📊 球種別データサマリー (MAX & 平均)")
+        
+        # 集計処理
+        stats_df = df.groupby('Pitch Type')[target_cols].agg(['max', 'mean']).reset_index()
+        
+        # カラム名を分かりやすく整形
+        stats_df.columns = [
+            '球種', 
+            '球速(MAX)', '球速(平均)', 
+            '回転数(MAX)', '回転数(平均)', 
+            '効率%(MAX)', '効率%(平均)', 
+            '縦変化(MAX)', '縦変化(平均)', 
+            '横変化(MAX)', '横変化(平均)'
+        ]
+        
+        # 小数点第1位で丸める
+        st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+    
+    # 3. スピンビジュアライザー（選択した球種の平均値を表示）
+    valid_data = df.dropna(subset=['Spin Direction', 'Total Spin', 'Pitch Type'])
     
     if not valid_data.empty:
-        row = valid_data.iloc[0]
-        spin_str = str(row['Spin Direction'])
-        rpm = float(row['Total Spin'])
-        p_type = str(row['Pitch Type']) if 'Pitch Type' in row else "Unknown"
+        st.divider()
+        st.subheader("🔄 スピン・シミュレーション")
         
-        # 1. 回転軸の計算
+        # 表示する球種を選択（デフォルトは最初の行）
+        available_types = valid_data['Pitch Type'].unique()
+        selected_type = st.selectbox("確認する球種を選択:", available_types)
+        
+        # 選択された球種の平均データを抽出
+        type_data = valid_data[valid_data['Pitch Type'] == selected_type].iloc[0]
+        spin_str = str(type_data['Spin Direction'])
+        rpm = float(type_data['Total Spin'])
+
+        # --- 以下、JavaScriptスピン描画ロジック ---
         try:
             hour, minute = map(int, spin_str.split(':'))
             total_min = (hour % 12) * 60 + minute
@@ -32,21 +63,17 @@ if uploaded_file is not None:
         except:
             axis = [1.0, 0.0, 0.0]
 
-        # 2. 縫い目の点群生成
-        t_st = np.linspace(0, 2 * np.pi, 200) # 密度をさらにUP
+        t_st = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
         sx = np.cos(t_st) + alpha * np.cos(3*t_st)
         sy = np.sin(t_st) - alpha * np.sin(3*t_st)
         sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
         norm = np.sqrt(sx**2 + sy**2 + sz**2)
-        
-        # 初期姿勢：左に膨らんだU (⊂)
         pts = np.vstack([sz/norm, sx/norm, sy/norm]).T 
         seam_points = pts.tolist()
 
-        # 3. ブラウザ側での描画（JavaScript）
         html_code = f"""
-        <div id="chart" style="width:100%; height:600px;"></div>
+        <div id="chart" style="width:100%; height:550px;"></div>
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         <script>
             var seam_base = {json.dumps(seam_points)};
@@ -64,7 +91,7 @@ if uploaded_file is not None:
                 ];
             }}
 
-            var n = 24; 
+            var n = 22; 
             var bx = [], by = [], bz = [];
             for(var i=0; i<=n; i++) {{
                 var v = Math.PI * i / n;
@@ -79,17 +106,14 @@ if uploaded_file is not None:
 
             var data = [
                 {{
-                    type: 'surface',
-                    x: bx, y: by, z: bz,
+                    type: 'surface', x: bx, y: by, z: bz,
                     colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']],
                     showscale: false, opacity: 1.0,
                     lighting: {{ambient: 0.85, diffuse: 0.45, specular: 0.05, roughness: 1.0}}
                 }},
                 {{
-                    type: 'scatter3d',
-                    mode: 'lines',
-                    x: [], y: [], z: [],
-                    line: {{color: '#BC1010', width: 35}} // 極太設定
+                    type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
+                    line: {{color: '#BC1010', width: 35}}
                 }}
             ];
 
@@ -108,34 +132,26 @@ if uploaded_file is not None:
             Plotly.newPlot('chart', data, layout);
 
             function update() {{
-                // ★さらに速度を1/5に（分母を1200に変更：実データの約0.05倍速）
-                angle += (rpm / 60) * (2 * Math.PI) / 1200; 
-                
+                angle += (rpm / 60) * (2 * Math.PI) / 1200; // 0.05倍速を維持
                 var rx = [], ry = [], rz = [];
                 for(var i=0; i<seam_base.length; i++) {{
                     var p = seam_base[i];
                     var r1 = rotate([p[0]*1.01, p[1]*1.01, p[2]*1.01], axis, angle);
                     var r2 = rotate([p[0]*1.05, p[1]*1.05, p[2]*1.05], axis, angle);
-                    
                     rx.push(r1[0], r2[0], null);
                     ry.push(r1[1], r2[1], null);
                     rz.push(r1[2], r2[2], null);
                 }}
-                
                 Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                 requestAnimationFrame(update);
             }}
             update();
         </script>
         """
-        st.components.v1.html(html_code, height=620)
-
-        st.subheader(f"解析対象: {p_type}")
-        c1, c2 = st.columns(2)
-        c1.metric("Total Spin (Actual)", f"{int(rpm)} RPM")
-        c2.metric("Display Speed", "0.05x (Frame-by-Frame View)")
+        st.components.v1.html(html_code, height=550)
         
     else:
-        st.warning("データが見つかりません。")
+        st.warning("解析可能な球種データが見つかりませんでした。")
+
 else:
     st.info("CSVファイルをアップロードしてください。")
