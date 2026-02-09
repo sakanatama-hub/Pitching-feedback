@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：12:48 スライス回転・完全再現")
+st.title("⚾ 完遂：12:48方向・奥向き順回転モデル")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -16,22 +16,16 @@ if uploaded_file is not None:
     valid_data = df.dropna(subset=['Spin Direction', 'Pitch Type'])
     if not valid_data.empty:
         row = valid_data.iloc[0]
-        spin_str = row['Spin Direction']
         p_type = row['Pitch Type']
     else:
         st.stop()
 
-    def create_1248_spin_model():
-        # 1. 12:48 の方向（右斜め上）を定義
-        # 短針の位置：12時から 48/60 * 30度 = 24度。
-        # ただし「12:48」は反時計回りに12分戻った位置（または右に大きく回った位置）
-        # ここでは投手から見て「12:48」の方向を [sin, 0, cos] で定義
+    def create_final_1248_spin():
+        # 1. 12:48 の方向（右斜め上）の角度計算
         gyro_angle = np.deg2rad((12 * 60 + 48) / 720 * 360) 
         
-        # 指示通り、この方向を向いたまま「右斜め下」へ送り出すための回転軸
-        # 12:48方向のベクトルに垂直な軸を回転軸（axis）にする
-        target_dir = np.array([np.sin(gyro_angle), 0, np.cos(gyro_angle)])
-        # 回転軸は、このターゲット方向に垂直な水平に近い軸
+        # 回転軸：12:48方向に垂直な軸を設定
+        # この軸を中心に回すことで、12:48の向きを保ったまま回転させる
         axis = np.array([np.cos(gyro_angle), 0, -np.sin(gyro_angle)])
 
         # 2. 野球ボール曲線 (U字構造) の生成
@@ -52,7 +46,6 @@ if uploaded_file is not None:
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
         # 3. 初期姿勢：U字の膨らみが左（⊂）
-        # 二等分線が左を向くようにセット
         R_init = np.array([
             [0, 0, 1],
             [1, 0, 0],
@@ -75,8 +68,8 @@ if uploaded_file is not None:
 
         frames = []
         for i in range(30):
-            # 右斜め下に向かって奥へ回転させる
-            angle = -(i / 30) * (2 * np.pi) 
+            # 【修正点】回転の符号をプラスにし、上から下（奥）へ向かう「順回転」に変更
+            angle = (i / 30) * (2 * np.pi) 
             r_ball = rotate_vecs(ball_mesh, axis, angle)
             r_st_center = rotate_vecs(st_oriented, axis, angle)
             
@@ -84,7 +77,7 @@ if uploaded_file is not None:
             off = 0.05
             for j in range(108):
                 p = r_st_center[:, j]
-                # 縫い目の厚み表現（軸に対して垂直にオフセット）
+                # 軸に対して垂直にステッチの幅を出す
                 side = np.cross(p, axis)
                 if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
                 side = side / np.linalg.norm(side)
@@ -111,15 +104,16 @@ if uploaded_file is not None:
                     "buttons": [{"label": "Play", "method": "animate", 
                                  "args": [None, {"frame": {"duration": 30, "redraw": True}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title="12:48方向へのスライス回転 (U字初期姿勢: 左膨らみ)",
+                title="12:48方向・順回転モデル（U字左膨らみ初期姿勢）",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_1248_spin_model(), use_container_width=True)
+    st.plotly_chart(create_final_1248_spin(), use_container_width=True)
 
+    # 自動再生JS
     st.components.v1.html(
         """<script>
         var itv = setInterval(function() {
@@ -129,4 +123,4 @@ if uploaded_file is not None:
         </script>""", height=0
     )
 else:
-    st.info("CSVファイルをアップロードしてください。")
+    st.info("CSVをアップロードしてください。")
