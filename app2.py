@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：U字二等分軸・ドリル回転モデル")
+st.title("⚾ 投手分析：12:48 スライス回転・完全再現")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -21,12 +21,19 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_u_axis_spinning_ball(spin_dir_str):
-        # 1. Rapsodoの時刻から回転軸の傾きを計算
-        hour, minute = map(int, spin_dir_str.split(':'))
-        total_min = (hour % 12) * 60 + minute
-        theta = (total_min / 720) * 2 * np.pi 
+    def create_1248_spin_model():
+        # 1. 12:48 の方向（右斜め上）を定義
+        # 短針の位置：12時から 48/60 * 30度 = 24度。
+        # ただし「12:48」は反時計回りに12分戻った位置（または右に大きく回った位置）
+        # ここでは投手から見て「12:48」の方向を [sin, 0, cos] で定義
+        gyro_angle = np.deg2rad((12 * 60 + 48) / 720 * 360) 
         
+        # 指示通り、この方向を向いたまま「右斜め下」へ送り出すための回転軸
+        # 12:48方向のベクトルに垂直な軸を回転軸（axis）にする
+        target_dir = np.array([np.sin(gyro_angle), 0, np.cos(gyro_angle)])
+        # 回転軸は、このターゲット方向に垂直な水平に近い軸
+        axis = np.array([np.cos(gyro_angle), 0, -np.sin(gyro_angle)])
+
         # 2. 野球ボール曲線 (U字構造) の生成
         t = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
@@ -44,23 +51,17 @@ if uploaded_file is not None:
         sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
-        # 3. 回転軸の定義（U字の二等分線）
-        # 12:48などの指定時刻の方向を向く回転軸ベクトル（Z軸を12:00とする）
-        # 投手から見て画面上の方向を示す軸
-        axis = np.array([np.sin(theta), 0, np.cos(theta)])
+        # 3. 初期姿勢：U字の膨らみが左（⊂）
+        # 二等分線が左を向くようにセット
+        R_init = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0]
+        ])
+        s_oriented = R_init @ s_base
+        st_oriented = R_init @ st_base
 
-        # 初期姿勢：二等分線がこの回転軸(axis)と一致するようにセット
-        # 基本姿勢(12:00)を、二等分線が真上を向くように調整
-        R_fix = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]])
-        
-        # 時刻に合わせて軸全体を傾ける
-        c_p, s_p = np.cos(theta), np.sin(theta)
-        Ry = np.array([[c_p, 0, s_p], [0, 1, 0], [-s_p, 0, c_p]])
-        
-        s_oriented = Ry @ R_fix @ s_base
-        st_oriented = Ry @ R_fix @ st_base
-
-        # 4. 回転アニメーション
+        # 4. アニメーション計算
         u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:40j]
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
         ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()]).astype(np.float64)
@@ -74,7 +75,8 @@ if uploaded_file is not None:
 
         frames = []
         for i in range(30):
-            angle = (i / 30) * (2 * np.pi)
+            # 右斜め下に向かって奥へ回転させる
+            angle = -(i / 30) * (2 * np.pi) 
             r_ball = rotate_vecs(ball_mesh, axis, angle)
             r_st_center = rotate_vecs(st_oriented, axis, angle)
             
@@ -82,19 +84,13 @@ if uploaded_file is not None:
             off = 0.05
             for j in range(108):
                 p = r_st_center[:, j]
-                # エラー回避のため外積計算を見直し。軸方向へステッチの幅を出す。
-                # 軸(axis)に垂直なベクトルを安定して生成
-                if abs(axis[0]) > 0.9:
-                    ref = np.array([0, 1, 0])
-                else:
-                    ref = np.array([1, 0, 0])
-                side = np.cross(axis, ref)
+                # 縫い目の厚み表現（軸に対して垂直にオフセット）
+                side = np.cross(p, axis)
+                if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
                 side = side / np.linalg.norm(side)
                 
-                # p_l, p_r を float 配列として計算
                 p_l = p * 1.01 + side * off
                 p_r = p * 1.01 - side * off
-                
                 rx.extend([float(p_l[0]), float(p_r[0]), None])
                 ry.extend([float(p_l[1]), float(p_r[1]), None])
                 rz.extend([float(p_l[2]), float(p_r[2]), None])
@@ -115,16 +111,15 @@ if uploaded_file is not None:
                     "buttons": [{"label": "Play", "method": "animate", 
                                  "args": [None, {"frame": {"duration": 30, "redraw": True}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"【{p_type}】 U字二等分軸（縦線平行）回転",
+                title="12:48方向へのスライス回転 (U字初期姿勢: 左膨らみ)",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_u_axis_spinning_ball(spin_str), use_container_width=True)
+    st.plotly_chart(create_1248_spin_model(), use_container_width=True)
 
-    # 自動再生JS
     st.components.v1.html(
         """<script>
         var itv = setInterval(function() {
@@ -134,4 +129,4 @@ if uploaded_file is not None:
         </script>""", height=0
     )
 else:
-    st.info("CSVをアップロードしてください。")
+    st.info("CSVファイルをアップロードしてください。")
