@@ -4,7 +4,7 @@ import numpy as np
 import json
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：低速・高精細スピン解析")
+st.title("⚾ 投手分析：超スロー・高精細スピン解析")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -32,7 +32,7 @@ if uploaded_file is not None:
         except:
             axis = [1.0, 0.0, 0.0]
 
-        # 2. 縫い目の点群生成（さらに密度を上げて滑らかに）
+        # 2. 縫い目の点群生成
         t_st = np.linspace(0, 2 * np.pi, 180)
         alpha = 0.4
         sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -81,15 +81,15 @@ if uploaded_file is not None:
                 {{
                     type: 'surface',
                     x: bx, y: by, z: bz,
-                    colorscale: [['0', '#FDFDFD'], ['1', '#FDFDFD']],
+                    colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']],
                     showscale: false, opacity: 1.0,
-                    lighting: {{ambient: 0.7, diffuse: 0.6, specular: 0.05, roughness: 0.9}}
+                    lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.05, roughness: 0.9}}
                 }},
                 {{
                     type: 'scatter3d',
                     mode: 'lines',
                     x: [], y: [], z: [],
-                    line: {{color: '#D11D1D', width: 24}} // ★太さをさらにアップ
+                    line: {{color: '#BC1010', width: 30}} // ★さらに太く設定
                 }}
             ];
 
@@ -108,15 +108,14 @@ if uploaded_file is not None:
             Plotly.newPlot('chart', data, layout);
 
             function update() {{
-                // ★回転速度を1/2に調整（/ 120 に変更）
-                angle += (rpm / 60) * (2 * Math.PI) / 120; 
+                // ★さらに速度を半分に（分母を240に変更：実データの1/4速度）
+                angle += (rpm / 60) * (2 * Math.PI) / 240; 
                 
                 var rx = [], ry = [], rz = [];
                 for(var i=0; i<seam_base.length; i++) {{
                     var p = seam_base[i];
-                    // 厚みをさらに強調
                     var r1 = rotate([p[0]*1.01, p[1]*1.01, p[2]*1.01], axis, angle);
-                    var r2 = rotate([p[0]*1.04, p[1]*1.04, p[2]*1.04], axis, angle);
+                    var r2 = rotate([p[0]*1.05, p[1]*1.05, p[2]*1.05], axis, angle);
                     
                     rx.push(r1[0], r2[0], null);
                     ry.push(r1[1], r2[1], null);
@@ -134,7 +133,7 @@ if uploaded_file is not None:
         st.subheader(f"解析対象: {p_type}")
         c1, c2 = st.columns(2)
         c1.metric("Total Spin (Actual)", f"{int(rpm)} RPM")
-        c2.metric("Display Speed", "0.5x Slow Motion")
+        c2.metric("Display Speed", "0.25x (Super Slow)")
         
     else:
         st.warning("データが見つかりません。")
