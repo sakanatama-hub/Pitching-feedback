@@ -12,19 +12,40 @@ if uploaded_file is not None:
     # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # 解析したい列のリスト
-    ideal_cols = ['Velocity', 'Total Spin', 'Spin Efficiency', 'VB (trajectory)', 'HB (trajectory)']
-    existing_cols = [c for c in ideal_cols if c in df.columns]
+    # Rapsodoの英語列名と日本語表示名のマッピング
+    col_map = {
+        'Velocity': '球速',
+        'Total Spin': '回転数',
+        'Spin Efficiency': 'スピン効率',
+        'VB (trajectory)': '縦変化量',
+        'HB (trajectory)': '横変化量'
+    }
+    
+    # 存在する列だけを抽出してリネーム
+    existing_cols = [c for c in col_map.keys() if c in df.columns]
     
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # 2. 球種ごとの統計テーブル作成
     if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-        st.subheader("📊 球種別データサマリー (MAX & 平均)")
+        st.subheader("📊 球種別データサマリー (最大 & 平均)")
+        
+        # 集計処理
         stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-        stats_group.columns = [f"{col}({stat.upper()})" for col, stat in stats_group.columns]
+        
+        # カラム名を日本語に変換
+        # 例: ('Velocity', 'max') -> '球速(最大)'
+        new_columns = []
+        for col, stat in stats_group.columns:
+            jp_name = col_map.get(col, col)
+            stat_name = "最大" if stat == 'max' else "平均"
+            new_columns.append(f"{jp_name}({stat_name})")
+        
         stats_df = stats_group.reset_index()
+        stats_df.columns = ['球種'] + new_columns
+        
+        # テーブル表示
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
     
     # 3. スピンビジュアライザー
@@ -37,28 +58,27 @@ if uploaded_file is not None:
             # 球種選択
             if 'Pitch Type' in df.columns:
                 available_types = sorted(valid_data['Pitch Type'].unique())
-                selected_type = st.selectbox("確認する球種を選択:", available_types)
+                selected_type = st.selectbox("確認する球種を選択してください:", available_types)
                 
                 # 選択した球種全体の平均値を計算
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 
-                # 回転軸（時刻）の平均計算は複雑なため、最頻値または代表値として1件目を取得
-                # ※より厳密には角度変換が必要ですが、まずは代表的な軸を表示します
+                # 回転軸は代表値として1件目を取得
                 rep_data = type_subset.iloc[0]
                 spin_str = str(rep_data['Spin Direction'])
-                rpm = float(avg_rpm) # 回転数は平均値を使用
+                rpm = float(avg_rpm)
             else:
                 idx = st.number_input("投球番号を選択", min_value=0, max_value=len(valid_data)-1, value=0)
                 rep_data = valid_data.iloc[idx]
                 spin_str = str(rep_data['Spin Direction'])
                 rpm = float(rep_data['Total Spin'])
-                selected_type = "Selected Pitch"
+                selected_type = "選択された投球"
 
-            # --- 平均データの表記を追加 ---
+            # --- 日本語での平均データ表記 ---
             st.subheader(f"🔄 {selected_type} の回転シミュレーション")
             col_a, col_b = st.columns(2)
-            col_a.markdown(f"### 平均回転数: **{int(rpm)}** <small>RPM</small>", unsafe_allow_html=True)
+            col_a.markdown(f"### 平均回転数: **{int(rpm)}** <small>rpm</small>", unsafe_allow_html=True)
             col_b.markdown(f"### 平均回転軸: **{spin_str}** <small>方向</small>", unsafe_allow_html=True)
 
             # JS用の回転軸計算
