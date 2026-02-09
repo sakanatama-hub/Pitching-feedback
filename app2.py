@@ -9,12 +9,12 @@ st.title("⚾ 投手分析：統計データ解析 & スピンビジュアライ
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
-    # 1. データ読み込み（4行スキップはRapsodo形式を想定）
+    # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # 取得したい理想の列名リスト
+    # 解析したい列のリスト
     ideal_cols = ['Velocity', 'Total Spin', 'Spin Efficiency', 'VB (trajectory)', 'HB (trajectory)']
-    # 実際にCSV内に存在する列だけを抽出（大文字小文字やスペースのミスを防ぐため）
+    # CSVに実際に存在する列だけを抽出
     existing_cols = [c for c in ideal_cols if c in df.columns]
     
     # 数値型に変換
@@ -25,21 +25,17 @@ if uploaded_file is not None:
     if 'Pitch Type' in df.columns and len(existing_cols) > 0:
         st.subheader("📊 球種別データサマリー (MAX & 平均)")
         
-        # 集計処理（存在する列のみを対象にする）
+        # 集計処理
         stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
         
-        # カラム名を「列名_統計名」の形から分かりやすい日本語に変換
-        # 例: ('Velocity', 'max') -> 'Velocity(MAX)'
+        # カラム名の整形
         stats_group.columns = [f"{col}({stat.upper()})" for col, stat in stats_group.columns]
         stats_df = stats_group.reset_index()
         
         # テーブル表示
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
-    else:
-        st.warning("統計計算に必要な列が見つかりませんでした。")
     
     # 3. スピンビジュアライザー
-    # 回転の表示に最低限必要な列があるかチェック
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
         
@@ -47,7 +43,7 @@ if uploaded_file is not None:
             st.divider()
             st.subheader("🔄 スピン・シミュレーション")
             
-            # 球種の選択肢（Pitch Typeがなければインデックスで選べるようにする）
+            # 球種選択
             if 'Pitch Type' in df.columns:
                 available_types = valid_data['Pitch Type'].unique()
                 selected_type = st.selectbox("確認する球種を選択:", available_types)
@@ -59,7 +55,7 @@ if uploaded_file is not None:
             spin_str = str(display_data['Spin Direction'])
             rpm = float(display_data['Total Spin'])
 
-            # --- JavaScript描画ロジック ---
+            # JS用の回転軸計算
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
@@ -68,6 +64,7 @@ if uploaded_file is not None:
             except:
                 axis = [1.0, 0.0, 0.0]
 
+            # 縫い目データ生成
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -153,13 +150,7 @@ if uploaded_file is not None:
                 update();
             </script>
             """
-            st.components.v1.html(html_code, height=550)
+            st.components.v1.html(html_code, height=600)
 
-### 修正のポイント
-1. **`existing_cols` による動的抽出**: `ideal_cols` の中で、実際にアップロードされたファイルに存在する列だけを使って計算するようにしました。これで `KeyError`（「そんな列ないよ」というエラー）を回避できます。
-2. **カラム名の動的生成**: 列名と統計量（max/mean）を自動で結合して表示するようにし、コードの柔軟性を高めました。
-3. **安全なデータアクセス**: 球種データがない場合も考慮し、インデックスでデータを選択できるようにフォールバック（予備処理）を入れています。
-
-GitHubに push して確認してみてください。今度はエラーなく表が表示されるはずです！
-
-表の中に「これ以外に追加したい項目」や、「この球種のこのデータをもっと詳しく見たい」といったリクエストはありますか？
+else:
+    st.info("CSVファイルをアップロードしてください。")
