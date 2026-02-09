@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import json
+import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：統計データ解析 & スピンビジュアライザー")
+st.title("⚾ 投手分析：総合データ解析ダッシュボード")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -12,7 +13,7 @@ if uploaded_file is not None:
     # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # Rapsodoの英語列名と日本語表示名のマッピング
+    # 英語名と日本語名のマッピング
     col_map = {
         'Velocity': '球速',
         'Total Spin': '回転数',
@@ -21,67 +22,79 @@ if uploaded_file is not None:
         'HB (trajectory)': '横変化量'
     }
     
-    # 存在する列だけを抽出してリネーム
     existing_cols = [c for c in col_map.keys() if c in df.columns]
-    
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # 2. 球種ごとの統計テーブル作成
+    # --- レイアウト：上段に統計、中段にグラフ、下段に回転 ---
+    
+    # 2. 統計テーブル
     if 'Pitch Type' in df.columns and len(existing_cols) > 0:
         st.subheader("📊 球種別データサマリー (最大 & 平均)")
-        
-        # 集計処理
         stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-        
-        # カラム名を日本語に変換
-        # 例: ('Velocity', 'max') -> '球速(最大)'
         new_columns = []
         for col, stat in stats_group.columns:
             jp_name = col_map.get(col, col)
             stat_name = "最大" if stat == 'max' else "平均"
             new_columns.append(f"{jp_name}({stat_name})")
-        
         stats_df = stats_group.reset_index()
         stats_df.columns = ['球種'] + new_columns
-        
-        # テーブル表示
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
-    
-    # 3. スピンビジュアライザー
-    if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
-        valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
+
+    # 3. 変化量グラフ (散布図)
+    if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
+        st.divider()
+        st.subheader("📈 変化量マップ (ムーブメントチャート)")
         
+        # 散布図の作成
+        fig_map = px.scatter(
+            df, 
+            x='HB (trajectory)', 
+            y='VB (trajectory)', 
+            color='Pitch Type',
+            hover_data=['Velocity', 'Total Spin'],
+            labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'},
+            title="捕手視点での変化量（中央が原点）"
+        )
+        
+        # グラフのデザイン調整（原点を通る十字線を追加）
+        fig_map.update_layout(
+            xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', range=[-60, 60]),
+            yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', range=[-60, 60]),
+            width=800,
+            height=600,
+            template="plotly_white"
+        )
+        # 捕手視点に合わせる（右投げの場合、シュート成分が右、スライダー成分が左）
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    # 4. スピンビジュアライザー
+    if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
+        st.divider()
+        
+        valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
         if not valid_data.empty:
-            st.divider()
-            
             # 球種選択
-            if 'Pitch Type' in df.columns:
-                available_types = sorted(valid_data['Pitch Type'].unique())
-                selected_type = st.selectbox("確認する球種を選択してください:", available_types)
-                
-                # 選択した球種全体の平均値を計算
+            available_types = sorted(valid_data['Pitch Type'].unique()) if 'Pitch Type' in df.columns else []
+            if available_types:
+                selected_type = st.selectbox("シミュレーションする球種を選択:", available_types)
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
-                
-                # 回転軸は代表値として1件目を取得
                 rep_data = type_subset.iloc[0]
                 spin_str = str(rep_data['Spin Direction'])
                 rpm = float(avg_rpm)
             else:
-                idx = st.number_input("投球番号を選択", min_value=0, max_value=len(valid_data)-1, value=0)
-                rep_data = valid_data.iloc[idx]
+                selected_type = "選択データ"
+                rep_data = valid_data.iloc[0]
                 spin_str = str(rep_data['Spin Direction'])
                 rpm = float(rep_data['Total Spin'])
-                selected_type = "選択された投球"
 
-            # --- 日本語での平均データ表記 ---
-            st.subheader(f"🔄 {selected_type} の回転シミュレーション")
+            st.subheader(f"🔄 {selected_type} の回転詳細")
             col_a, col_b = st.columns(2)
-            col_a.markdown(f"### 平均回転数: **{int(rpm)}** <small>rpm</small>", unsafe_allow_html=True)
-            col_b.markdown(f"### 平均回転軸: **{spin_str}** <small>方向</small>", unsafe_allow_html=True)
+            col_a.metric("平均回転数", f"{int(rpm)} rpm")
+            col_b.metric("代表的な回転軸", f"{spin_str} 方向")
 
-            # JS用の回転軸計算
+            # --- JavaScript描画 (省略せず保持) ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
@@ -90,7 +103,6 @@ if uploaded_file is not None:
             except:
                 axis = [1.0, 0.0, 0.0]
 
-            # 縫い目データ生成
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -119,42 +131,23 @@ if uploaded_file is not None:
                     ];
                 }}
 
-                var n = 22; 
-                var bx = [], by = [], bz = [];
+                var n = 22; var bx = [], by = [], bz = [];
                 for(var i=0; i<=n; i++) {{
-                    var v = Math.PI * i / n;
-                    bx[i] = []; by[i] = []; bz[i] = [];
+                    var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                     for(var j=0; j<=n; j++) {{
                         var u = 2 * Math.PI * j / n;
-                        bx[i][j] = Math.cos(u) * Math.sin(v);
-                        by[i][j] = Math.sin(u) * Math.sin(v);
-                        bz[i][j] = Math.cos(v);
+                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
                     }}
                 }}
 
                 var data = [
-                    {{
-                        type: 'surface', x: bx, y: by, z: bz,
-                        colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']],
-                        showscale: false, opacity: 1.0,
-                        lighting: {{ambient: 0.85, diffuse: 0.45, specular: 0.05, roughness: 1.0}}
-                    }},
-                    {{
-                        type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
-                        line: {{color: '#BC1010', width: 35}}
-                    }}
+                    {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']], showscale: false, opacity: 1.0 }},
+                    {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }}
                 ];
 
                 var layout = {{
-                    scene: {{
-                        xaxis: {{visible: false, range: [-1.1, 1.1]}},
-                        yaxis: {{visible: false, range: [-1.1, 1.1]}},
-                        zaxis: {{visible: false, range: [-1.1, 1.1]}},
-                        aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.7, z: 0}}}}
-                    }},
-                    margin: {{l:0, r:0, b:0, t:0}},
-                    showlegend: false
+                    scene: {{ xaxis: {{visible: false, range: [-1.1, 1.1]}}, yaxis: {{visible: false, range: [-1.1, 1.1]}}, zaxis: {{visible: false, range: [-1.1, 1.1]}}, aspectmode: 'cube', camera: {{eye: {{x: 0, y: -1.7, z: 0}}}} }},
+                    margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
                 }};
 
                 Plotly.newPlot('chart', data, layout);
@@ -166,13 +159,11 @@ if uploaded_file is not None:
                         var p = seam_base[i];
                         var r1 = rotate([p[0]*1.01, p[1]*1.01, p[2]*1.01], axis, angle);
                         var r2 = rotate([p[0]*1.05, p[1]*1.05, p[2]*1.05], axis, angle);
-                        rx.push(r1[0], r2[0], null);
-                        ry.push(r1[1], r2[1], null);
-                        rz.push(r1[2], r2[2], null);
+                        rx.push(r1[0], r2[0], null); ry.push(r1[1], r2[1], null); rz.push(r1[2], r2[2], null);
                     }}
                     Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                     requestAnimationFrame(update);
-                }}
+                }
                 update();
             </script>
             """
