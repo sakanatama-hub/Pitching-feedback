@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：12:48 ジャイロ回転・完全再現")
+st.title("⚾ 投手分析：U字二等分軸回転モデル")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -16,33 +16,25 @@ if uploaded_file is not None:
     valid_data = df.dropna(subset=['Spin Direction', 'Pitch Type'])
     if not valid_data.empty:
         row = valid_data.iloc[0]
-        # spin_str = row['Spin Direction'] # Rapsodoの値は使いつつ、軸は12:48に固定
+        spin_str = row['Spin Direction']
         p_type = row['Pitch Type']
     else:
         st.stop()
 
-    def create_gyro_spinning_ball():
-        # 1. 12:48 の方向を回転軸として定義
-        # 12:48 は 12時から数えて 48/60 * 360度 = 288度 (または反時計回りに傾いた方向)
-        gyro_hour = 12
-        gyro_min = 48
-        # 時計の12:48を数学的な角度(ラジアン)に変換
-        # 12:00が真上(Z軸)とした場合
-        tilt_deg = (gyro_hour % 12 + gyro_min / 60) * 30
-        tilt_rad = np.deg2rad(tilt_deg)
+    def create_u_axis_spinning_ball(spin_dir_str):
+        # 1. Rapsodoの時刻から「軸の傾き」を計算
+        hour, minute = map(int, spin_dir_str.split(':'))
+        total_min = (hour % 12) * 60 + minute
+        theta = (total_min / 720) * 2 * np.pi 
         
-        # 軸：指定された「12:48」の方向へドリル回転する軸
-        # 投手から見てその方向を向くベクトル
-        axis = np.array([np.sin(tilt_rad), 0, np.cos(tilt_rad)])
-
         # 2. 野球ボール曲線 (U字構造) の生成
         t = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
-        sx_raw = np.cos(t) + alpha * np.cos(3*t)
-        sy_raw = np.sin(t) - alpha * np.sin(3*t)
-        sz_raw = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-        norm = np.sqrt(sx_raw**2 + sy_raw**2 + sz_raw**2)
-        s_base = np.vstack([sx_raw/norm, sy_raw/norm, sz_raw/norm])
+        sx = np.cos(t) + alpha * np.cos(3*t)
+        sy = np.sin(t) - alpha * np.sin(3*t)
+        sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+        norm = np.sqrt(sx**2 + sy**2 + sz**2)
+        s_base = np.vstack([sx/norm, sy/norm, sz/norm])
 
         # 108本のステッチ
         t_st = np.linspace(0, 2 * np.pi, 108)
@@ -52,16 +44,29 @@ if uploaded_file is not None:
         sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
-        # 3. 初期姿勢：U字の膨らみが左（⊂）の状態でセット
-        R_init = np.array([
+        # 3. 【ここが重要】U字の二等分線を軸にする設定
+        # 元の座標系でU字を貫く「二等分線」はY軸方向
+        # この軸を「回転軸」として、時刻に合わせて傾ける
+        
+        # 初期姿勢：二等分線が投手から見て12:00（真上）を向くようにセット
+        R_fix = np.array([
             [0, 1, 0],
             [0, 0, 1],
             [1, 0, 0]
         ])
-        s_oriented = R_init @ s_base
-        st_oriented = R_init @ st_base
+        
+        # 指示された「時刻（12:48等）」の方向を向く回転軸ベクトル
+        # Z軸を12:00とした回転
+        axis = np.array([np.sin(theta), 0, np.cos(theta)])
 
-        # 4. 回転シミュレーション
+        # ボール自体の初期向きも、この回転軸に二等分線が重なるように調整
+        c_p, s_p = np.cos(theta), np.sin(theta)
+        Ry = np.array([[c_p, 0, s_p], [0, 1, 0], [-s_p, 0, c_p]])
+        
+        s_oriented = Ry @ R_fix @ s_base
+        st_oriented = Ry @ R_fix @ st_base
+
+        # 4. 回転アニメーション
         u, v = np.mgrid[0:2*np.pi:40j, 0:np.pi:40j]
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
         ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()])
@@ -83,7 +88,7 @@ if uploaded_file is not None:
             off = 0.05
             for j in range(108):
                 p = r_st_center[:, j]
-                # 側面方向の広がり（常に軸に対して垂直にオフセット）
+                # 軸に垂直な方向にステッチの幅を出す
                 side = np.cross(p, axis)
                 if np.linalg.norm(side) < 0.01: side = np.array([0, 1, 0])
                 side /= np.linalg.norm(side)
@@ -109,16 +114,16 @@ if uploaded_file is not None:
                     "buttons": [{"label": "Play", "method": "animate", 
                                  "args": [None, {"frame": {"duration": 30, "redraw": True}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"【{p_type}】 12:48 軸回転シミュレーション",
+                title=f"【{p_type}】 U字二等分軸回転 ({spin_str})",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_gyro_spinning_ball(), use_container_width=True)
+    st.plotly_chart(create_u_axis_spinning_ball(spin_str), use_container_width=True)
 
-    # 自動再生
+    # 自動再生JS
     st.components.v1.html(
         """<script>
         var itv = setInterval(function() {
@@ -128,4 +133,4 @@ if uploaded_file is not None:
         </script>""", height=0
     )
 else:
-    st.info("CSVファイルをアップロードしてください。")
+    st.info("CSVをアップロードしてください。")
