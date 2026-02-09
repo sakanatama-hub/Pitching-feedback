@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：超滑らか・自動回転ビジュアライザー")
+st.title("⚾ 投手分析：リアルタイム・スピン解析")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -22,14 +22,15 @@ if uploaded_file is not None:
     else:
         st.stop()
 
-    def create_ultra_smooth_spin(spin_dir_str, rpm):
+    def create_pure_spin_model(spin_dir_str, rpm):
         # 1. 回転軸の計算
         hour, minute = map(int, spin_dir_str.split(':'))
         total_min = (hour % 12) * 60 + minute
         theta = (total_min / 720) * 2 * np.pi 
+        # 進行方向へ吸い込まれるスライス軸
         axis = np.array([np.cos(theta), 0, -np.sin(theta)])
 
-        # 2. 野球ボール構造（U字）
+        # 2. 形状生成
         t = np.linspace(0, 2 * np.pi, 200)
         alpha = 0.4
         sx = np.cos(t) + alpha * np.cos(3*t)
@@ -45,16 +46,16 @@ if uploaded_file is not None:
         sn = np.sqrt(ssx**2 + ssy**2 + ssz**2)
         st_base = np.vstack([ssx/sn, ssy/sn, ssz/sn])
 
+        # 初期姿勢：左に膨らんだU
         R_init = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
         st_oriented = R_init @ st_base
 
-        # 3. 滑らかさの調整（60fps相当）
+        # 3. アニメーション設定 (60FPS)
         fps = 60
         num_frames = 60
-        # 1周するのに必要な角度ではなく、rpmに基づいた1フレームの進み
         angle_step = (rpm / 60) * (2 * np.pi) / fps
 
-        u, v = np.mgrid[0:2*np.pi:30j, 0:np.pi:30j]
+        u, v = np.mgrid[0:2*np.pi:25j, 0:np.pi:25j] # メッシュを少し軽くして滑らかさ優先
         bx, by, bz = np.cos(u)*np.sin(v), np.sin(u)*np.sin(v), np.cos(v)
         ball_mesh = np.vstack([bx.flatten(), by.flatten(), bz.flatten()]).astype(np.float64)
 
@@ -85,7 +86,8 @@ if uploaded_file is not None:
                 rz.extend([float(p_l[2]), float(p_r[2]), None])
 
             frames.append(go.Frame(data=[
-                go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape)),
+                go.Surface(x=r_ball[0].reshape(bx.shape), y=r_ball[1].reshape(by.shape), z=r_ball[2].reshape(bz.shape),
+                           colorscale=[[0, 'white'], [1, 'white']], showscale=False), # シンプルな白に固定
                 go.Scatter3d(x=rx, y=ry, z=rz, mode='lines', line=dict(color='#BC1010', width=12))
             ], name=f'f{i}'))
 
@@ -93,23 +95,22 @@ if uploaded_file is not None:
             data=frames[0].data,
             layout=go.Layout(
                 scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False, aspectmode='cube',
-                           camera=dict(eye=dict(x=0, y=-1.8, z=0)),
-                           dragmode=False), # 勝手に回るのでドラッグ無効化でよりスムーズに
+                           camera=dict(eye=dict(x=0, y=-1.8, z=0))),
                 updatemenus=[{
                     "type": "buttons", "showactive": False,
                     "buttons": [{"label": "Play", "method": "animate", 
                                  "args": [None, {"frame": {"duration": 1000/fps, "redraw": False}, "fromcurrent": True, "loop": True}]}]
                 }],
-                title=f"【{p_type}】 {spin_str}方向へ {int(rpm)}rpm で自動回転中",
+                title=f"{p_type} | {spin_str} | {int(rpm)} rpm",
                 margin=dict(l=0, r=0, b=0, t=50)
             ),
             frames=frames
         )
         return fig
 
-    st.plotly_chart(create_ultra_smooth_spin(spin_str, total_spin), use_container_width=True)
+    st.plotly_chart(create_pure_spin_model(spin_str, total_spin), use_container_width=True)
 
-    # JavaScriptで強制自動再生（Playボタンを隠してクリック）
+    # 強制自動再生JS
     st.components.v1.html(
         """
         <script>
@@ -118,7 +119,6 @@ if uploaded_file is not None:
            buttons.forEach(function(btn) {
                if(btn.innerText === "Play") {
                    btn.click();
-                   // btn.style.display = "none"; // ボタンを隠したい場合は有効化
                    clearInterval(checkExist);
                }
            });
@@ -127,4 +127,4 @@ if uploaded_file is not None:
         """, height=0
     )
 else:
-    st.info("CSVファイルをアップロードしてください。")
+    st.info("CSVをアップロードしてください。")
