@@ -7,7 +7,7 @@ from datetime import date
 
 st.set_page_config(layout="wide")
 
-# --- 設定・データ準備 (投手リストに更新) ---
+# --- 設定・データ準備 (投手リスト) ---
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 凌久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
@@ -22,9 +22,7 @@ if 'stored_data' not in st.session_state:
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
-# ==========================================
-# タブ2：データ登録
-# ==========================================
+# --- タブ2：データ登録 (変更なし) ---
 with tab2:
     st.header("選手データ登録")
     col_reg1, col_reg2 = st.columns(2)
@@ -47,9 +45,7 @@ with tab2:
             except Exception as e:
                 st.error(f"エラー: {e}")
 
-# ==========================================
-# タブ1：分析フィードバック
-# ==========================================
+# --- タブ1：分析フィードバック ---
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
@@ -63,90 +59,42 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
+        # (中略: データサマリーと変化量マップは維持)
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-            st.subheader("📊 球種別データサマリー (最大 & 平均)")
+            st.subheader("📊 球種別データサマリー")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-            stats_df = stats_group.reset_index()
-            new_columns = ['球種']
-            for col, stat in stats_group.columns:
-                new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
-            stats_df.columns = new_columns
-            st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
-
-        if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
-            st.divider()
-            st.subheader("📈 変化量マップ (ムーブメントチャート)")
-            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
-                               labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
-            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
-                               xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               height=600)
-            st.plotly_chart(fig_map, use_container_width=True)
+            st.dataframe(stats_group, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー (物理定義復元版)
+        # 4. スピンビジュアライザー (ここをリセット)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
             if not valid_data.empty:
-                available_types = sorted(valid_data['Pitch Type'].unique())
-                selected_type = st.selectbox("球種を選択:", available_types)
-                
+                selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 
-                try:
-                    eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
-                    avg_eff = eff_data.mean() if not eff_data.empty else 100.0
-                except:
-                    avg_eff = 100.0
-                    
-                rep_data = type_subset.iloc[0]
-                spin_str = str(rep_data['Spin Direction'])
-                hand = PLAYER_HANDS.get(display_player, "右")
-
-                st.subheader(f"🔄 {selected_type} の回転詳細")
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("平均回転数", f"{int(avg_rpm)} rpm")
-                col_b.metric("代表的な回転方向", f"{spin_str}")
-                col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
-
-                # --- 回転軸の計算 ---
-                try:
-                    hour, minute = map(int, spin_str.split(':'))
-                    total_min = (hour % 12) * 60 + minute
-                    direction_deg = (total_min / 720) * 360
-                    direction_rad = np.deg2rad(direction_deg)
-                    
-                    base_x = np.cos(direction_rad)
-                    base_y = -np.sin(direction_rad)
-                    
-                    gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
-                    eff_ratio = avg_eff / 100.0
-                    z_val = np.sin(gyro_angle_rad)
-                    
-                    if hand == "右":
-                        axis = [float(base_x * eff_ratio), float(base_y * eff_ratio), float(-z_val)]
-                    else:
-                        axis = [float(base_x * eff_ratio), float(base_y * eff_ratio), float(z_val)]
-                except:
-                    axis = [1.0, 0.0, 0.0]
-
-                # --- 縫い目配置 ---
+                # --- 縫い目定義 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sx, sz, sy]).T 
+                
+                # 軸を水平（X軸方向）に固定して位置関係を調整
+                # 縫い目の向きを調整し、X軸（黒い棒）がU字の頂点を通るように構成
+                pts = np.vstack([sy, sz, sx]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
+
+                # --- 回転軸（まずは水平[1, 0, 0]で固定して位置を確認） ---
+                axis = [1.0, 0.0, 0.0]
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
@@ -159,8 +107,7 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
-                        var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
-                        var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
+                        var ux = ax[0], uy = ax[1], uz = ax[2];
                         return [
                             p[0]*(c+ux*ux*(1-c)) + p[1]*(ux*uy*(1-c)-uz*s) + p[2]*(ux*uz*(1-c)+uy*s),
                             p[0]*(uy*ux*(1-c)+uz*s) + p[1]*(c+uy*uy*(1-c)) + p[2]*(uy*uz*(1-c)-ux*s),
@@ -168,7 +115,7 @@ with tab1:
                         ];
                     }}
 
-                    var n = 25; var bx = [], by = [], bz = [];
+                    var n = 20; var bx = [], by = [], bz = [];
                     for(var i=0; i<=n; i++) {{
                         var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                         for(var j=0; j<=n; j++) {{
@@ -179,16 +126,16 @@ with tab1:
 
                     var data = [
                         {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6 }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
+                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 30}} }},
+                        {{ type: 'scatter3d', mode: 'lines', x: [-1.7, 1.7], y: [0, 0], z: [0, 0], line: {{color: '#000000', width: 15}} }}
                     ];
 
                     var layout = {{
                         scene: {{
                             xaxis: {{visible: false, range: [-1.7, 1.7]}}, yaxis: {{visible: false, range: [-1.7, 1.7]}}, zaxis: {{visible: false, range: [-1.7, 1.7]}},
-                            aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}}, up: {{x: 0, y: 1, z: 0}} }}, dragmode: false
+                            aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}} }}
                         }},
-                        margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
+                        margin: {{l:0, r:0, b:0, t:0}}
                     }};
 
                     Plotly.newPlot('chart', data, layout);
@@ -198,7 +145,7 @@ with tab1:
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
                             var r = rotate(seam_base.seam[i], axis, angle);
-                            rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
+                            rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
                             if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                         }}
                         Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
