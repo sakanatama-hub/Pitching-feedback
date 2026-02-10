@@ -5,14 +5,14 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：回転軸定義・修正版")
+st.title("⚾ 投手分析：縫い目中心固定・スピン解析")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # マッピング等は維持
+    # 統計・グラフ部分は維持
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
     existing_cols = [c for c in col_map.keys() if c in df.columns]
     for col in existing_cols:
@@ -30,32 +30,33 @@ if uploaded_file is not None:
             spin_str = str(rep_data['Spin Direction'])
             rpm = float(avg_rpm)
 
-            # --- 回転軸の計算（定義修正：方向に対して軸は90度直交） ---
+            # --- 回転軸と縫い目の角度計算 ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
-                # 回転方向の角度（12:00 = 0度）
                 direction_deg = (total_min / 720) * 360
-                # 回転軸の角度：回転方向から90度時計回りにずらす
-                # これにより 12:00(方向) -> 03:00(水平な軸)
-                # 01:00(方向) -> 04:00(右斜め下の軸) になる
+                
+                # 軸は方向に直交（01:00なら04:00方向）
                 axis_deg = direction_deg + 90
                 axis_rad = np.deg2rad(axis_deg)
-                
                 axis = [float(np.sin(axis_rad)), float(np.cos(axis_rad)), 0.0]
-                # 縫い目の初期傾き用（方向そのものの角度）
+                
+                # 縫い目が軸に刺さるようにするための初期傾き
                 direction_rad = np.deg2rad(direction_deg)
             except:
-                axis = [1.0, 0.0, 0.0] # デフォルト水平軸
+                axis = [1.0, 0.0, 0.0]
                 direction_rad = 0
 
-            # 縫い目データ（バックスピン初期姿勢）
+            # --- 縫い目データの初期配置（U字のど真ん中を軸に合わせる） ---
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-            pts = np.vstack([sz, -sx, sy]).T 
+            
+            # 軸が水平([1,0,0])の時に、U字の頂点を左右に持ってくるための配置
+            # これで棒がU字を貫く形になります
+            pts = np.vstack([sx, sy, sz]).T 
             norm = np.linalg.norm(pts, axis=1, keepdims=True)
             pts = pts / norm
             seam_points = pts.tolist()
@@ -125,9 +126,9 @@ if uploaded_file is not None:
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.seam.length; i++) {{
                         var p = seam_base.seam[i];
-                        // 縫い目を「回転方向」の傾きに合わせる（軸と直交）
+                        // 1. 縫い目をスピン方向の角度に傾ける
                         var r_init = rotate(p, [0,0,1], {direction_rad}); 
-                        // その後、黒い棒(axis)を中心に回転
+                        // 2. 串刺しになった軸(axis)周りに回転
                         var r = rotate(r_init, axis, angle);
                         rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                         if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
