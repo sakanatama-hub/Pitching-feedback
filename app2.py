@@ -8,14 +8,19 @@ from datetime import date
 st.set_page_config(layout="wide")
 
 # --- 設定・データ準備 ---
-PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚 武蔵": "左", "#4 北村 祥治": "右", "#5 前田 健伸": "左", "#6 佐藤 勇基": "右", "#7 西村 友哉": "右", "#8 和田 佳大": "左", "#9 今泉 颯太": "右", "#10 福井 章吾": "左", "#22 高祖 健輔": "左", "#23 箱山 遥人": "右", "#24 坂巻 尚哉": "右", "#26 西村 彰浩": "左", "#27 小畑 尋規": "右", "#28 宮崎 仁斗": "右", "#29 徳本 健太朗": "左", "#39 柳 元珍": "左", "#99 尾瀬 雄大": "左"}
+# 利き腕判定用（新規選手分）
+PLAYER_HANDS = {
+    "#11 大栄 陽斗": "右", "#12 村上 凌久": "右", "#13 細川 拓哉": "右", "#14 ヴァデルナ・フェルガス": "左",
+    "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", "#17 加藤 泰靖": "右", "#18 市川 祐": "右",
+    "#19 高尾 響": "右", "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
+}
 
-NEW_PLAYERS = [
+# 選択肢はこのリストのみに限定
+ALL_PLAYER_NAMES = [
     "#11 大栄 陽斗", "#12 村上 凌久", "#13 細川 拓哉", "#14 ヴァデルナ・フェルガス",
     "#15 渕上 佳輝", "#16 後藤 凌寿", "#17 加藤 泰靖", "#18 市川 祐",
     "#19 高尾 響", "#20 嘉陽 宗一郎", "#21 池村 健太郎", "#30 平野 大智"
 ]
-ALL_PLAYER_NAMES = sorted(list(PLAYER_HANDS.keys()) + NEW_PLAYERS)
 
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = {}
@@ -125,7 +130,6 @@ with tab1:
                 pts = np.vstack([sy, -sz, sx]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # JavaScriptの波括弧をすべて {{ }} に置換済み
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
