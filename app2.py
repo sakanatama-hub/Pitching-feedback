@@ -62,6 +62,7 @@ with tab1:
             display_date = st.selectbox("日付を選択", list(st.session_state['stored_data'][display_player].keys()))
         
         df = st.session_state['stored_data'][display_player][display_date]
+        hand = PLAYER_HANDS.get(display_player, "右")
 
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
@@ -69,28 +70,18 @@ with tab1:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-            st.subheader("📊 球種別データサマリー (最大 & 平均)")
+            st.subheader("📊 球種別データサマリー")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-            stats_df = stats_group.reset_index()
-            new_columns = ['球種']
-            for col, stat in stats_group.columns:
-                new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
-            stats_df.columns = new_columns
-            st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+            st.dataframe(stats_group, use_container_width=True)
 
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
-            st.subheader("📈 変化量マップ (ムーブメントチャート)")
-            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
-                               labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
-            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
-                               xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               height=600)
+            st.subheader("📈 変化量マップ")
+            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type')
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (01:00方向 & 縫い目同期修正版)
+        # 3. スピンビジュアライザー (01:00 / 80% 効率)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -99,34 +90,39 @@ with tab1:
                 selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
-                
-                # --- 1. 基本となる「12:00（水平軸）」での縫い目配置 ---
+
+                # --- 1. 基本となる「12:00（水平軸）」縫い目 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                base_pts = np.vstack([sz, sx, sy]).T # 水平軸[1,0,0]用の初期配置
+                base_pts = np.vstack([sz, sx, sy]).T 
 
-                # --- 2. 角度（01:00 = 30度）に合わせて「軸」と「縫い目」の両方を回転させる ---
+                # --- 2. 回転方向の傾斜 (01:00 = 30deg) ---
                 tilt_deg = 30  
                 tilt_rad = np.deg2rad(tilt_deg)
-                
-                # 回転行列（Z軸まわり＝正面から見た傾き）
-                cos_t = np.cos(tilt_rad)
-                sin_t = np.sin(tilt_rad)
-                # 時計回りなので行列の符号を調整
-                rot_z = np.array([
-                    [cos_t,  sin_t, 0],
-                    [-sin_t, cos_t, 0],
-                    [0,      0,     1]
-                ])
+                cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
+                rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
-                # 軸の傾き計算
-                axis = rot_z @ np.array([1.0, 0.0, 0.0])
+                # --- 3. 回転効率の傾斜 (80% = ジャイロ角18deg) ---
+                eff = 80.0
+                gyro_deg = (100 - eff) * 0.9  # 100%で0度, 0%で90度
+                gyro_rad = np.deg2rad(gyro_deg)
+                cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                 
-                # 縫い目データ全体を傾ける
-                tilted_pts = (base_pts @ rot_z.T)
+                # 右投手は右側が奥（Y軸まわりに回転）
+                if hand == "右":
+                    rot_gyro = np.array([[cos_g, 0, sin_g], [0, 1, 0], [-sin_g, 0, cos_g]])
+                else:
+                    rot_gyro = np.array([[cos_g, 0, -sin_g], [0, 1, 0], [sin_g, 0, cos_g]])
+
+                # 全体の回転行列 (方向傾斜した後に奥行きをつける)
+                combined_rot = rot_gyro @ rot_z
+
+                # 軸と縫い目に適用
+                axis = combined_rot @ np.array([1.0, 0.0, 0.0])
+                tilted_pts = (base_pts @ combined_rot.T)
                 seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
                 html_code = f"""
@@ -140,7 +136,8 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
-                        var ux = ax[0], uy = ax[1], uz = ax[2];
+                        var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
+                        var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
                             p[0]*(c+ux*ux*(1-c)) + p[1]*(ux*uy*(1-c)-uz*s) + p[2]*(ux*uz*(1-c)+uy*s),
                             p[0]*(uy*ux*(1-c)+uz*s) + p[1]*(c+uy*uy*(1-c)) + p[2]*(uy*uz*(1-c)-ux*s),
