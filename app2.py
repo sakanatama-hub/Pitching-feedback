@@ -67,6 +67,7 @@ with tab1:
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # 1. 統計サマリー
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -77,6 +78,7 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
+        # 2. 変化量チャート
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
@@ -87,7 +89,7 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
-        # --- スピンビジュアライザー (回転定義の完全復元) ---
+        # 3. ビジュアライザー (以前の成功定義を完全復元)
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -110,12 +112,11 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-                # --- 完璧だった頃の計算ロジック ---
+                # --- 完璧だった頃の計算ロジック復元 ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
                     direction_deg = (total_min / 720) * 360
-                    
                     axis_deg = direction_deg + 90
                     axis_rad = np.deg2rad(axis_deg)
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
@@ -133,15 +134,14 @@ with tab1:
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # --- 完璧だった頃の縫い目（串刺し）定義 ---
+                # --- 完璧だった頃の縫い目（串刺し）定義復元 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sy, -sz, sx]).T  # この並びが重要
-                norm = np.linalg.norm(pts, axis=1, keepdims=True)
-                seam_points = (pts / norm).tolist()
+                pts = np.vstack([sy, -sz, sx]).T 
+                seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
@@ -153,6 +153,7 @@ with tab1:
                     var angle = 0;
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
+                        var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
                         var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                         var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
