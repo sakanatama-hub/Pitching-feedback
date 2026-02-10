@@ -9,7 +9,7 @@ st.set_page_config(layout="wide")
 
 # --- 設定・データ準備 (投手リスト) ---
 PLAYER_HANDS = {
-    "#11 大栄 陽斗": "右", "#12 村上 凌久": "右", "#13 細川 拓哉": "右", 
+    "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
     "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", 
     "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
@@ -22,7 +22,9 @@ if 'stored_data' not in st.session_state:
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
-# --- タブ2：データ登録 (維持) ---
+# ==========================================
+# タブ2：データ登録
+# ==========================================
 with tab2:
     st.header("選手データ登録")
     col_reg1, col_reg2 = st.columns(2)
@@ -45,7 +47,9 @@ with tab2:
             except Exception as e:
                 st.error(f"エラー: {e}")
 
-# --- タブ1：分析フィードバック ---
+# ==========================================
+# タブ1：分析フィードバック
+# ==========================================
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
@@ -59,11 +63,13 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
+        # カラム名のマッピングと数値変換
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # 1. 球種別サマリー
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー (最大 & 平均)")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -74,6 +80,7 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
+        # 2. ムーブメントチャート
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             st.subheader("📈 変化量マップ (ムーブメントチャート)")
@@ -86,28 +93,30 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー (バックスピン・真横軸固定版)
+        # 3. スピンビジュアライザー (バックスピン方向 & U字位置固定)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
             if not valid_data.empty:
-                selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
+                available_types = sorted(valid_data['Pitch Type'].unique())
+                selected_type = st.selectbox("球種を選択:", available_types)
+                
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 
-                # --- 縫い目定義 ---
+                # --- 縫い目定義 (U字が正面を向き、軸[1,0,0]が中心を貫く配置) ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 
-                # U字が正面を向くように配置
+                # 座標スタック: szをX(軸方向)に持ってくることで、Uの字を維持したまま回転させる
                 pts = np.vstack([sz, sx, sy]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # 回転軸を真横(X軸)に固定
+                # 回転軸は真横 (X軸)
                 axis = [1.0, 0.0, 0.0]
 
                 html_code = f"""
@@ -155,8 +164,8 @@ with tab1:
                     Plotly.newPlot('chart', data, layout);
 
                     function update() {{
-                        // バックスピン（下から上への動き）にするため、angleをマイナス方向に
-                        angle -= (rpm / 60) * (2 * Math.PI) / 1000; 
+                        // バックスピン方向：angleをプラス方向に加算
+                        angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
                             var r = rotate(seam_base.seam[i], axis, angle);
