@@ -125,7 +125,7 @@ with tab1:
                 pts = np.vstack([sy, -sz, sx]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # JavaScript内の波括弧を二重にする（{{ }}）
+                # JavaScriptの波括弧をすべて {{ }} に置換済み
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -153,7 +153,12 @@ with tab1:
                         }}
                     }}
                     var data = [
-                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6, lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}} }},
+                        {{ 
+                            type: 'surface', x: bx, y: by, z: bz, 
+                            colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
+                            showscale: false, opacity: 0.6, 
+                            lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}} 
+                        }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
                     ];
@@ -171,7 +176,7 @@ with tab1:
                             var r = rotate(r_init, axis, angle);
                             rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                             if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                        }
+                        }}
                         Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                         requestAnimationFrame(update);
                     }}
