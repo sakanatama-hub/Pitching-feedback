@@ -29,11 +29,17 @@ if uploaded_file is not None:
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
             avg_rpm = type_subset['Total Spin'].mean()
-            avg_eff = type_subset['Spin Efficiency'].mean() if 'Spin Efficiency' in df.columns else 100.0
+            
+            # --- 平均回転効率をアップロードデータから抽出 ---
+            if 'Spin Efficiency' in type_subset.columns:
+                avg_eff = type_subset['Spin Efficiency'].mean()
+            else:
+                avg_eff = 100.0 # カラムがない場合のデフォルト
+                
             rep_data = type_subset.iloc[0]
             spin_str = str(rep_data['Spin Direction'])
             
-            # 簡易的な利き腕判定（ファイル名やデータから選手を特定できない場合はデフォルト右）
+            # 利き腕判定
             hand = "右" 
             for name, side in PLAYER_HANDS.items():
                 if any(part in str(uploaded_file.name) for part in name.split()):
@@ -46,36 +52,34 @@ if uploaded_file is not None:
             col_b.metric("代表的な回転方向", f"{spin_str}")
             col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-            # --- 回転軸の計算（ジャイロ加味） ---
+            # --- 回転軸の計算（ジャイロ加味・定義維持） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
                 direction_deg = (total_min / 720) * 360
                 
-                # XY平面上の軸（100%効率時の軸）
+                # XY平面上の軸（100%効率時のベース軸）
                 axis_deg = direction_deg + 90
                 axis_rad = np.deg2rad(axis_deg)
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
-                # 効率による奥行き(Z)の計算
-                # 効率 100% -> gyro_angle = 0 (XY面), 0% -> gyro_angle = 90 (YZ面)
-                gyro_angle_rad = np.arccos(avg_eff / 100.0)
+                # 効率によるジャイロ角度（0-90度）
+                gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                 
-                # 利き腕による奥行き方向の反転（右投手：右側が奥へ）
+                # 利き腕による奥行き（Z）方向の決定
                 if hand == "右":
                     z_factor = -np.sin(gyro_angle_rad) 
                 else:
                     z_factor = np.sin(gyro_angle_rad)
 
-                # 最終的な3D回転軸
-                # 効率が下がるほど Z成分が大きくなり、X,Y成分が小さくなる
+                # 最終的な3D回転軸：効率が下がるほどX,Y成分が小さくなりZが大きくなる
                 axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_factor)]
                 direction_rad = np.deg2rad(direction_deg)
             except:
                 axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-            # 縫い目配置（串刺し定義を維持）
+            # 縫い目配置（棒がU字の頂点を貫く定義を維持）
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -97,7 +101,6 @@ if uploaded_file is not None:
                 function rotate(p, ax, a) {{
                     var c = Math.cos(a), s = Math.sin(a);
                     var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
-                    // 軸の長さを正規化して回転
                     var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                     var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                     return [
@@ -139,9 +142,7 @@ if uploaded_file is not None:
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.seam.length; i++) {{
                         var p = seam_base.seam[i];
-                        // 1. まず現在のスピン方向に縫い目を傾ける
                         var r_init = rotate(p, [0,0,1], {direction_rad}); 
-                        // 2. その後、奥行きを含めた回転軸(axis)周りに回転
                         var r = rotate(r_init, axis, angle);
                         rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                         if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
