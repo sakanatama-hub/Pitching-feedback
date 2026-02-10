@@ -14,11 +14,7 @@ PLAYER_HANDS = {
     "#19 高尾 響": "右", "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
 }
 
-ALL_PLAYER_NAMES = [
-    "#11 大栄 陽斗", "#12 村上 凌久", "#13 細川 拓哉", "#14 ヴァデルナ・フェルガス",
-    "#15 渕上 佳輝", "#16 後藤 凌寿", "#17 加藤 泰靖", "#18 市川 祐",
-    "#19 高尾 響", "#20 嘉陽 宗一郎", "#21 池村 健太郎", "#30 平野 大智"
-]
+ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = {}
@@ -34,34 +30,29 @@ with tab2:
     with col_reg1:
         target_player = st.selectbox("選手を選択", ALL_PLAYER_NAMES)
         target_date = st.date_input("測定日を選択", date.today())
-    
-    # Excelファイル(.xlsx, .xls)を型に追加
-    uploaded_file = st.file_uploader("ファイルをアップロード (CSV または Excel)", type=['csv', 'xlsx', 'xls'], key="uploader_tab2")
+    uploaded_file = st.file_uploader("ファイルをアップロード", type=['csv', 'xlsx', 'xls'], key="uploader_tab2")
 
     if uploaded_file is not None:
         if st.button("データを登録する"):
-            # ファイル形式に応じて読み込み方法を分岐
             try:
                 if uploaded_file.name.endswith('.csv'):
                     new_df = pd.read_csv(uploaded_file, skiprows=4)
                 else:
-                    # Excelの場合も同様に4行スキップ
                     new_df = pd.read_excel(uploaded_file, skiprows=4)
-                
                 if target_player not in st.session_state['stored_data']:
                     st.session_state['stored_data'][target_player] = {}
                 st.session_state['stored_data'][target_player][str(target_date)] = new_df
                 st.success(f"{target_player} の {target_date} 分のデータを登録しました！")
             except Exception as e:
-                st.error(f"ファイルの読み込みに失敗しました: {e}")
+                st.error(f"エラー: {e}")
 
 # ==========================================
-# タブ1：分析フィードバック (コード維持)
+# タブ1：分析フィードバック
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
-        st.info("まずは「データ登録」タブからファイルをアップロードしてください。")
+        st.info("「データ登録」タブからファイルをアップロードしてください。")
     else:
         sel_col1, sel_col2 = st.columns(2)
         with sel_col1:
@@ -96,6 +87,7 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
+        # --- スピンビジュアライザー (回転定義の完全復元) ---
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -118,26 +110,38 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
+                # --- 完璧だった頃の計算ロジック ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
                     direction_deg = (total_min / 720) * 360
+                    
                     axis_deg = direction_deg + 90
                     axis_rad = np.deg2rad(axis_deg)
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
-                    base_x, base_y = np.sin(axis_rad), np.cos(axis_rad)
-                    z_val = -np.sin(gyro_angle_rad) if hand == "右" else np.sin(gyro_angle_rad)
+                    
+                    base_x = np.sin(axis_rad)
+                    base_y = np.cos(axis_rad)
+                    
+                    if hand == "右":
+                        z_val = -np.sin(gyro_angle_rad) 
+                    else:
+                        z_val = np.sin(gyro_angle_rad)
+
                     axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
                     direction_rad = np.deg2rad(direction_deg)
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
+                # --- 完璧だった頃の縫い目（串刺し）定義 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
-                sx, sy = np.cos(t_st) + alpha * np.cos(3*t_st), np.sin(t_st) - alpha * np.sin(3*t_st)
+                sx = np.cos(t_st) + alpha * np.cos(3*t_st)
+                sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sy, -sz, sx]).T 
-                seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
+                pts = np.vstack([sy, -sz, sx]).T  # この並びが重要
+                norm = np.linalg.norm(pts, axis=1, keepdims=True)
+                seam_points = (pts / norm).tolist()
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
@@ -148,7 +152,7 @@ with tab1:
                     var rpm = {avg_rpm};
                     var angle = 0;
                     function rotate(p, ax, a) {{
-                        var c = Math.cos(a), s = Math.sin(a), dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
+                        var c = Math.cos(a), s = Math.sin(a);
                         var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                         var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
@@ -166,12 +170,7 @@ with tab1:
                         }}
                     }}
                     var data = [
-                        {{ 
-                            type: 'surface', x: bx, y: by, z: bz, 
-                            colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
-                            showscale: false, opacity: 0.6, 
-                            lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}} 
-                        }},
+                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6, lighting: {{ambient:0.8, diffuse:0.5, specular:0.1, roughness:1.0}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
                     ];
