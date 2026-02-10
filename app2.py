@@ -28,13 +28,17 @@ if uploaded_file is not None:
             selected_type = st.selectbox("球種を選択:", available_types)
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
+            
+            # --- 平均回転効率の抽出（数値変換を確実に行う） ---
             avg_rpm = type_subset['Total Spin'].mean()
             
-            # --- 平均回転効率をアップロードデータから抽出 ---
+            # Spin Efficiency カラムを数値化して平均を取る
             if 'Spin Efficiency' in type_subset.columns:
-                avg_eff = type_subset['Spin Efficiency'].mean()
+                # %記号などが混じっている可能性を考慮し、coerceで数値化
+                eff_series = pd.to_numeric(type_subset['Spin Efficiency'], errors='coerce').dropna()
+                avg_eff = eff_series.mean() if not eff_series.empty else 100.0
             else:
-                avg_eff = 100.0 # カラムがない場合のデフォルト
+                avg_eff = 100.0
                 
             rep_data = type_subset.iloc[0]
             spin_str = str(rep_data['Spin Direction'])
@@ -58,28 +62,26 @@ if uploaded_file is not None:
                 total_min = (hour % 12) * 60 + minute
                 direction_deg = (total_min / 720) * 360
                 
-                # XY平面上の軸（100%効率時のベース軸）
                 axis_deg = direction_deg + 90
                 axis_rad = np.deg2rad(axis_deg)
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
-                # 効率によるジャイロ角度（0-90度）
+                # 効率によるジャイロ角度
                 gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                 
-                # 利き腕による奥行き（Z）方向の決定
                 if hand == "右":
                     z_factor = -np.sin(gyro_angle_rad) 
                 else:
                     z_factor = np.sin(gyro_angle_rad)
 
-                # 最終的な3D回転軸：効率が下がるほどX,Y成分が小さくなりZが大きくなる
+                # 最終軸
                 axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_factor)]
                 direction_rad = np.deg2rad(direction_deg)
             except:
                 axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-            # 縫い目配置（棒がU字の頂点を貫く定義を維持）
+            # 縫い目配置（棒がU字の頂点を貫く定義）
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -154,3 +156,6 @@ if uploaded_file is not None:
             </script>
             """
             st.components.v1.html(html_code, height=600)
+
+else:
+    st.info("CSVファイルをアップロードしてください。")
