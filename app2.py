@@ -13,10 +13,8 @@ PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
-    # 1. データ読み込み（4行スキップは維持）
     df = pd.read_csv(uploaded_file, skiprows=4)
     
-    # 統計用のマッピング
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
     existing_cols = [c for c in col_map.keys() if c in df.columns]
     for col in existing_cols:
@@ -31,11 +29,8 @@ if uploaded_file is not None:
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
             
-            # --- 平均回転効率の抽出（K列 = インデックス10 を直接参照） ---
             avg_rpm = type_subset['Total Spin'].mean()
-            
             try:
-                # iloc[:, 10] でK列を取得。数値化して平均。
                 eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
                 avg_eff = eff_data.mean() if not eff_data.empty else 100.0
             except:
@@ -44,7 +39,6 @@ if uploaded_file is not None:
             rep_data = type_subset.iloc[0]
             spin_str = str(rep_data['Spin Direction'])
             
-            # 利き腕判定
             hand = "右" 
             for name, side in PLAYER_HANDS.items():
                 if any(part in str(uploaded_file.name) for part in name.split()):
@@ -57,32 +51,39 @@ if uploaded_file is not None:
             col_b.metric("代表的な回転方向", f"{spin_str}")
             col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-            # --- 回転軸の計算（ジャイロ加味・定義維持） ---
+            # --- 回転軸の計算（ジャイロ旋回定義の修正） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
                 direction_deg = (total_min / 720) * 360
                 
+                # XY平面上（100%効率）の軸角度
                 axis_deg = direction_deg + 90
                 axis_rad = np.deg2rad(axis_deg)
+                
+                # 効率によるジャイロ傾斜角（100%->0rad, 0%->π/2 rad）
+                gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
+                
+                # 効率100%時の単位ベクトル
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
-                # 効率によるジャイロ角度（100%->0, 0%->π/2）
-                gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
-                
+                # XZ面上の旋回：右投手は反時計回り、左投手は時計回り
+                # 100%でZ=0, 0%でZ=1。XとYは効率(avg_eff/100)倍に縮小される
                 if hand == "右":
-                    z_factor = -np.sin(gyro_angle_rad) 
+                    # 右投手の反時計回り旋回 (Zをマイナス方向に振ることで右側が奥へ)
+                    z_val = -np.sin(gyro_angle_rad) 
                 else:
-                    z_factor = np.sin(gyro_angle_rad)
+                    # 左投手の時計回り旋回 (Zをプラス方向に振ることで左側が奥へ)
+                    z_val = np.sin(gyro_angle_rad)
 
-                # 最終軸（効率が下がるほど奥行きZが支配的になる）
-                axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_factor)]
+                # 最終的な3D回転軸：水平成分は効率(cos)に比例して短くなる
+                axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
                 direction_rad = np.deg2rad(direction_deg)
             except:
                 axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-            # 縫い目配置（棒がU字の頂点を貫く定義）
+            # 縫い目配置
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
