@@ -27,7 +27,6 @@ def time_to_degrees(time_str):
         match = re.match(r"(\d+):(\d+)", str(time_str))
         if not match: return 0.0
         hh, mm = map(int, match.groups())
-        # 12:00を0度とし、1時間で30度、1分で0.5度回転
         total_minutes = (hh % 12) * 60 + mm
         return total_minutes * 0.5
     except:
@@ -74,24 +73,35 @@ with tab1:
         with sel_col2:
             display_date = st.selectbox("日付を選択", list(st.session_state['stored_data'][display_player].keys()))
         
-        df = st.session_state['stored_data'][display_player][display_date]
+        df = st.session_state['stored_data'][display_player][display_date].copy()
         hand = PLAYER_HANDS.get(display_player, "右")
 
-        col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
-        existing_cols = [c for c in col_map.keys() if c in df.columns]
-        for col in existing_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        # --- 指定されたヘッダー名 ---
+        c_dir = 'Spin Direction'
+        c_rev = 'True Spin (release)'
+        c_eff = 'Spin Efficiency (release)'
+        c_vb = 'VB (trajectory)'
+        c_hb = 'HB (trajectory)'
 
-        if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-            st.subheader("📊 球種別データサマリー (平均値)")
-            stats_group = df.groupby('Pitch Type')[existing_cols].mean()
+        # 数値変換とクリーニング
+        for c in [c_rev, c_eff, c_vb, c_hb]:
+            if c in df.columns:
+                # %が入っている場合に備えて文字列置換してから数値化
+                df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
+
+        # 1. サマリー表示
+        st.subheader("📊 球種別データサマリー (平均値)")
+        display_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
+        if 'Pitch Type' in df.columns and display_cols:
+            stats_group = df.groupby('Pitch Type')[display_cols].mean()
             st.dataframe(stats_group.style.format(precision=1), use_container_width=True)
 
-        if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
+        # 2. ムーブメントチャート
+        if c_vb in df.columns and c_hb in df.columns:
             st.divider()
-            st.subheader("📈 変化量マップ (ムーブメントチャート)")
-            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
-                               labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)'})
+            st.subheader("📈 変化量マップ")
+            fig_map = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type',
+                               labels={c_hb: '横変化 (cm)', c_vb: '縦変化 (cm)'})
             fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
                                xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
                                yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
@@ -99,29 +109,29 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (データ自動連動版)
+        # 3. スピンビジュアライザー (実データ連動)
         # ==========================================
-        if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
+        if c_dir in df.columns and c_rev in df.columns:
             st.divider()
             st.subheader("⚾️ スピンビジュアライザー")
-            valid_data = df.dropna(subset=['Spin Direction', 'Total Spin', 'Spin Efficiency'])
+            
+            check_cols = [c for c in [c_dir, c_rev, c_eff] if c in df.columns]
+            valid_data = df.dropna(subset=check_cols)
             
             if not valid_data.empty:
                 selected_type = st.selectbox("球種を選択して回転を確認:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 
-                # 数値データの平均を取得
-                avg_rpm = type_subset['Total Spin'].mean()
-                avg_eff = type_subset['Spin Efficiency'].mean()
+                avg_rpm = type_subset[c_rev].mean()
+                avg_eff = type_subset[c_eff].mean() if c_eff in type_subset.columns else 100.0
                 
-                # 回転方向(時刻)の平均的な角度を算出 (簡易的に最初の有効データまたは最頻値的な扱い)
-                avg_dir_str = type_subset['Spin Direction'].iloc[0] 
+                # 回転方向は最初の有効なデータを使用
+                avg_dir_str = type_subset[c_dir].iloc[0] 
                 tilt_deg = time_to_degrees(avg_dir_str)
                 
-                st.write(f"**平均データ**: {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / 回転方向 {avg_dir_str}")
+                st.write(f"**表示データ平均**: {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / 回転方向 {avg_dir_str}")
 
                 # --- 物理計算 ---
-                # 1. 縫い目初期配置
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -129,12 +139,10 @@ with tab1:
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 base_pts = np.vstack([sz, sx, sy]).T 
 
-                # 2. 回転方向傾斜 (時計まわり)
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
-                # 3. 回転効率傾斜 (ジャイロ角)
                 gyro_deg = (100 - avg_eff) * 0.9
                 gyro_rad = np.deg2rad(gyro_deg)
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
@@ -144,7 +152,6 @@ with tab1:
                 else:
                     rot_gyro = np.array([[cos_g, 0, -sin_g], [0, 1, 0], [sin_g, 0, cos_g]])
 
-                # 4. 統合
                 combined_rot = rot_gyro @ rot_z
                 axis = combined_rot @ np.array([1.0, 0.0, 0.0])
                 tilted_pts = (base_pts @ combined_rot.T)
