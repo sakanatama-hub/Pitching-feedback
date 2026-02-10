@@ -86,7 +86,7 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー (サイドスピンU字維持版)
+        # 4. スピンビジュアライザー (バックスピン・真横軸固定版)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -103,13 +103,11 @@ with tab1:
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 
-                # U字を「正面」に向けるために座標軸を回転
-                # X軸(黒い棒)を中心に回転させるのではなく、Y軸を「奥行き」にして
-                # 縫い目が常にサイド（横）から見てU字に見える配置
+                # U字が正面を向くように配置
                 pts = np.vstack([sz, sx, sy]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # 水平な回転軸
+                # 回転軸を真横(X軸)に固定
                 axis = [1.0, 0.0, 0.0]
 
                 html_code = f"""
@@ -149,15 +147,16 @@ with tab1:
                     var layout = {{
                         scene: {{
                             xaxis: {{visible: false, range: [-1.7, 1.7]}}, yaxis: {{visible: false, range: [-1.7, 1.7]}}, zaxis: {{visible: false, range: [-1.7, 1.7]}},
-                            aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}} }}
+                            aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}}, up: {{x: 0, y: 1, z: 0}} }}, dragmode: false
                         }},
-                        margin: {{l:0, r:0, b:0, t:0}}
+                        margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
                     }};
 
                     Plotly.newPlot('chart', data, layout);
 
                     function update() {{
-                        angle += (rpm / 60) * (2 * Math.PI) / 1000; 
+                        // バックスピン（下から上への動き）にするため、angleをマイナス方向に
+                        angle -= (rpm / 60) * (2 * Math.PI) / 1000; 
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
                             var r = rotate(seam_base.seam[i], axis, angle);
