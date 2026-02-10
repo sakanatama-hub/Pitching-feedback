@@ -87,133 +87,143 @@ with tab1:
         # ==========================================
         # 4. スピンビジュアライザー (ここを完璧だったコードに完全置換)
         # ==========================================
-        if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
-            st.divider()
-            valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
-            if not valid_data.empty:
-                available_types = sorted(valid_data['Pitch Type'].unique())
-                selected_type = st.selectbox("球種を選択:", available_types)
+       if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
+        st.divider()
+        valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
+        if not valid_data.empty:
+            available_types = sorted(valid_data['Pitch Type'].unique())
+            selected_type = st.selectbox("球種を選択:", available_types)
+            
+            type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
+            avg_rpm = type_subset['Total Spin'].mean()
+            
+            # K列(10)から効率を抽出
+            try:
+                eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
+                avg_eff = eff_data.mean() if not eff_data.empty else 100.0
+            except:
+                avg_eff = 100.0
                 
-                type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
-                avg_rpm = type_subset['Total Spin'].mean()
+            rep_data = type_subset.iloc[0]
+            spin_str = str(rep_data['Spin Direction'])
+            
+            # 利き腕判定
+            hand = "右" 
+            for name, side in PLAYER_HANDS.items():
+                if any(part in str(uploaded_file.name) for part in name.split()):
+                    hand = side
+                    break
+
+            st.subheader(f"🔄 {selected_type} の回転詳細")
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("平均回転数", f"{int(avg_rpm)} rpm")
+            col_b.metric("代表的な回転方向", f"{spin_str}")
+            col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
+
+            # --- 回転軸の計算（ジャイロ旋回定義・復元） ---
+            try:
+                hour, minute = map(int, spin_str.split(':'))
+                total_min = (hour % 12) * 60 + minute
+                direction_deg = (total_min / 720) * 360
                 
-                try:
-                    eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
-                    avg_eff = eff_data.mean() if not eff_data.empty else 100.0
-                except:
-                    avg_eff = 100.0
-                    
-                rep_data = type_subset.iloc[0]
-                spin_str = str(rep_data['Spin Direction'])
+                axis_deg = direction_deg + 90
+                axis_rad = np.deg2rad(axis_deg)
+                gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                 
-                hand = PLAYER_HANDS.get(display_player, "右")
+                base_x = np.sin(axis_rad)
+                base_y = np.cos(axis_rad)
+                
+                # 右投手は反時計、左投手は時計回りに旋回（XZ平面）
+                if hand == "右":
+                    z_val = -np.sin(gyro_angle_rad) 
+                else:
+                    z_val = np.sin(gyro_angle_rad)
 
-                st.subheader(f"🔄 {selected_type} の回転詳細")
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("平均回転数", f"{int(avg_rpm)} rpm")
-                col_b.metric("代表的な回転方向", f"{spin_str}")
-                col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
+                axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
+                direction_rad = np.deg2rad(direction_deg)
+            except:
+                axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # --- 回転軸の計算（ジャイロ旋回定義・復元） ---
-                try:
-                    hour, minute = map(int, spin_str.split(':'))
-                    total_min = (hour % 12) * 60 + minute
-                    direction_deg = (total_min / 720) * 360
-                    
-                    axis_deg = direction_deg + 90
-                    axis_rad = np.deg2rad(axis_deg)
-                    gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
-                    
-                    base_x = np.sin(axis_rad)
-                    base_y = np.cos(axis_rad)
-                    
-                    if hand == "右":
-                        z_val = -np.sin(gyro_angle_rad) 
-                    else:
-                        z_val = np.sin(gyro_angle_rad)
+            # --- 縫い目配置（串刺し定義・復元） ---
+            t_st = np.linspace(0, 2 * np.pi, 200)
+            alpha = 0.4
+            sx = np.cos(t_st) + alpha * np.cos(3*t_st)
+            sy = np.sin(t_st) - alpha * np.sin(3*t_st)
+            sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
+            pts = np.vstack([sy, -sz, sx]).T 
+            norm = np.linalg.norm(pts, axis=1, keepdims=True)
+            seam_points = (pts / norm).tolist()
 
-                    axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
-                    direction_rad = np.deg2rad(direction_deg)
-                except:
-                    axis = [1.0, 0.0, 0.0]; direction_rad = 0
+            html_code = f"""
+            <div id="chart" style="width:100%; height:600px;"></div>
+            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+            <script>
+                var seam_base = {{ seam: {json.dumps(seam_points)} }};
+                var axis = {json.dumps(axis)};
+                var rpm = {avg_rpm};
+                var angle = 0;
 
-                # --- 縫い目配置（串刺し定義・復元） ---
-                t_st = np.linspace(0, 2 * np.pi, 200)
-                alpha = 0.4
-                sx = np.cos(t_st) + alpha * np.cos(3*t_st)
-                sy = np.sin(t_st) - alpha * np.sin(3*t_st)
-                sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sy, -sz, sx]).T 
-                norm = np.linalg.norm(pts, axis=1, keepdims=True)
-                seam_points = (pts / norm).tolist()
-
-                html_code = f"""
-                <div id="chart" style="width:100%; height:600px;"></div>
-                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-                <script>
-                    var seam_base = {{ seam: {json.dumps(seam_points)} }};
-                    var axis = {json.dumps(axis)};
-                    var rpm = {avg_rpm};
-                    var angle = 0;
-
-                    function rotate(p, ax, a) {{
-                        var c = Math.cos(a), s = Math.sin(a);
-                        var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
-                        var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
-                        var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
-                        return [
-                            p[0]*(c+ux*ux*(1-c)) + p[1]*(ux*uy*(1-c)-uz*s) + p[2]*(ux*uz*(1-c)+uy*s),
-                            p[0]*(uy*ux*(1-c)+uz*s) + p[1]*(c+uy*uy*(1-c)) + p[2]*(uy*uz*(1-c)-ux*s),
-                            p[0]*(uz*ux*(1-c)-uy*s) + p[1]*(uz*uy*(1-c)+ux*s) + p[2]*(c+uz*uz*(1-c))
-                        ];
-                    }}
-
-                    var n = 25; var bx = [], by = [], bz = [];
-                    for(var i=0; i<=n; i++) {{
-                        var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
-                        for(var j=0; j<=n; j++) {{
-                            var u = 2 * Math.PI * j / n;
-                            bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
-                        }}
-                    }}
-
-                    var data = [
-                        {{ 
-                            type: 'surface', x: bx, y: by, z: bz, 
-                            colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
-                            showscale: false, opacity: 0.6,
-                            lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
-                        }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
-                        {{ type: 'scatter3d', mode: 'lines',
-                          x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7],
-                          line: {{color: '#000000', width: 15}} }}
+                function rotate(p, ax, a) {{
+                    var c = Math.cos(a), s = Math.sin(a);
+                    var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
+                    var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
+                    var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
+                    return [
+                        p[0]*(c+ux*ux*(1-c)) + p[1]*(ux*uy*(1-c)-uz*s) + p[2]*(ux*uz*(1-c)+uy*s),
+                        p[0]*(uy*ux*(1-c)+uz*s) + p[1]*(c+uy*uy*(1-c)) + p[2]*(uy*uz*(1-c)-ux*s),
+                        p[0]*(uz*ux*(1-c)-uy*s) + p[1]*(uz*uy*(1-c)+ux*s) + p[2]*(c+uz*uz*(1-c))
                     ];
+                }}
 
-                    var layout = {{
-                        scene: {{
-                            xaxis: {{visible: false, range: [-1.7, 1.7]}}, yaxis: {{visible: false, range: [-1.7, 1.7]}}, zaxis: {{visible: false, range: [-1.7, 1.7]}},
-                            aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}}, up: {{x: 0, y: 1, z: 0}} }}, dragmode: false
-                        }},
-                        margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
-                    }};
-
-                    Plotly.newPlot('chart', data, layout);
-
-                    function update() {{
-                        angle += (rpm / 60) * (2 * Math.PI) / 1000; 
-                        var rx = [], ry = [], rz = [];
-                        for(var i=0; i<seam_base.seam.length; i++) {{
-                            var p = seam_base.seam[i];
-                            var r_init = rotate(p, [0,0,1], {direction_rad}); 
-                            var r = rotate(r_init, axis, angle);
-                            rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
-                            if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                        }}
-                        Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
-                        requestAnimationFrame(update);
+                var n = 25; var bx = [], by = [], bz = [];
+                for(var i=0; i<=n; i++) {{
+                    var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
+                    for(var j=0; j<=n; j++) {{
+                        var u = 2 * Math.PI * j / n;
+                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
                     }}
-                    update();
-                </script>
-                """
-                st.components.v1.html(html_code, height=600)
+                }}
+
+                var data = [
+                    {{ 
+                        type: 'surface', x: bx, y: by, z: bz, 
+                        colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
+                        showscale: false, opacity: 0.6,
+                        lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
+                    }},
+                    {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
+                    {{ type: 'scatter3d', mode: 'lines',
+                      x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7],
+                      line: {{color: '#000000', width: 15}} }}
+                ];
+
+                var layout = {{
+                    scene: {{
+                        xaxis: {{visible: false, range: [-1.7, 1.7]}}, yaxis: {{visible: false, range: [-1.7, 1.7]}}, zaxis: {{visible: false, range: [-1.7, 1.7]}},
+                        aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}}, up: {{x: 0, y: 1, z: 0}} }}, dragmode: false
+                    }},
+                    margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
+                }};
+
+                Plotly.newPlot('chart', data, layout);
+
+                function update() {{
+                    angle += (rpm / 60) * (2 * Math.PI) / 1000; 
+                    var rx = [], ry = [], rz = [];
+                    for(var i=0; i<seam_base.seam.length; i++) {{
+                        var p = seam_base.seam[i];
+                        var r_init = rotate(p, [0,0,1], {direction_rad}); 
+                        var r = rotate(r_init, axis, angle);
+                        rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
+                        if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
+                    }}
+                    Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
+                    requestAnimationFrame(update);
+                }}
+                update();
+            </script>
+            """
+            st.components.v1.html(html_code, height=600)
+
+else:
+    st.info("CSVファイルをアップロードしてください。")
