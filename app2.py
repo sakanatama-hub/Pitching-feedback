@@ -4,6 +4,7 @@ import numpy as np
 import json
 import plotly.express as px
 from datetime import date
+import re
 
 st.set_page_config(layout="wide")
 
@@ -19,6 +20,18 @@ ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = {}
+
+def time_to_degrees(time_str):
+    """'12:15' のような形式を角度(12:00基準)に変換"""
+    try:
+        match = re.match(r"(\d+):(\d+)", str(time_str))
+        if not match: return 0.0
+        hh, mm = map(int, match.groups())
+        # 12:00を0度とし、1時間で30度、1分で0.5度回転
+        total_minutes = (hh % 12) * 60 + mm
+        return total_minutes * 0.5
+    except:
+        return 0.0
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
@@ -70,28 +83,45 @@ with tab1:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-            st.subheader("📊 球種別データサマリー")
-            stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-            st.dataframe(stats_group, use_container_width=True)
+            st.subheader("📊 球種別データサマリー (平均値)")
+            stats_group = df.groupby('Pitch Type')[existing_cols].mean()
+            st.dataframe(stats_group.style.format(precision=1), use_container_width=True)
 
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
-            st.subheader("📈 変化量マップ")
-            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type')
+            st.subheader("📈 変化量マップ (ムーブメントチャート)")
+            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
+                               labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)'})
+            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                               xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                               yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                               height=600)
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (11:40 / 30% 効率)
+        # 3. スピンビジュアライザー (データ自動連動版)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
-            valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
+            st.subheader("⚾️ スピンビジュアライザー")
+            valid_data = df.dropna(subset=['Spin Direction', 'Total Spin', 'Spin Efficiency'])
+            
             if not valid_data.empty:
-                selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
+                selected_type = st.selectbox("球種を選択して回転を確認:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
+                
+                # 数値データの平均を取得
                 avg_rpm = type_subset['Total Spin'].mean()
+                avg_eff = type_subset['Spin Efficiency'].mean()
+                
+                # 回転方向(時刻)の平均的な角度を算出 (簡易的に最初の有効データまたは最頻値的な扱い)
+                avg_dir_str = type_subset['Spin Direction'].iloc[0] 
+                tilt_deg = time_to_degrees(avg_dir_str)
+                
+                st.write(f"**平均データ**: {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / 回転方向 {avg_dir_str}")
 
-                # --- 1. 基本となる「12:00（水平軸）」縫い目 ---
+                # --- 物理計算 ---
+                # 1. 縫い目初期配置
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -99,29 +129,23 @@ with tab1:
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 base_pts = np.vstack([sz, sx, sy]).T 
 
-                # --- 2. 回転方向の傾斜 (11:40 = -10deg) ---
-                # 12:00から反時計回りに10度 (1時間=30度なので、20分=10度)
-                tilt_deg = -10  
+                # 2. 回転方向傾斜 (時計まわり)
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
-                # --- 3. 回転効率の傾斜 (30% = ジャイロ角63deg) ---
-                eff = 30.0
-                gyro_deg = (100 - eff) * 0.9  # 100%で0度, 0%で90度
+                # 3. 回転効率傾斜 (ジャイロ角)
+                gyro_deg = (100 - avg_eff) * 0.9
                 gyro_rad = np.deg2rad(gyro_deg)
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                 
-                # 右投手は右側が奥へ
                 if hand == "右":
                     rot_gyro = np.array([[cos_g, 0, sin_g], [0, 1, 0], [-sin_g, 0, cos_g]])
                 else:
                     rot_gyro = np.array([[cos_g, 0, -sin_g], [0, 1, 0], [sin_g, 0, cos_g]])
 
-                # 全体の回転行列
+                # 4. 統合
                 combined_rot = rot_gyro @ rot_z
-
-                # 軸と縫い目に適用
                 axis = combined_rot @ np.array([1.0, 0.0, 0.0])
                 tilted_pts = (base_pts @ combined_rot.T)
                 seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
@@ -137,8 +161,7 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
-                        var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
-                        var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
+                        var ux = ax[0], uy = ax[1], uz = ax[2];
                         return [
                             p[0]*(c+ux*ux*(1-c)) + p[1]*(ux*uy*(1-c)-uz*s) + p[2]*(ux*uz*(1-c)+uy*s),
                             p[0]*(uy*ux*(1-c)+uz*s) + p[1]*(c+uy*uy*(1-c)) + p[2]*(uy*uz*(1-c)-ux*s),
@@ -146,7 +169,8 @@ with tab1:
                         ];
                     }}
 
-                    var n = 20; var bx = [], by = [], bz = [];
+                    var bx = [], by = [], bz = [];
+                    var n = 20;
                     for(var i=0; i<=n; i++) {{
                         var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                         for(var j=0; j<=n; j++) {{
@@ -166,7 +190,7 @@ with tab1:
                             xaxis: {{visible: false, range: [-1.7, 1.7]}}, yaxis: {{visible: false, range: [-1.7, 1.7]}}, zaxis: {{visible: false, range: [-1.7, 1.7]}},
                             aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.2}}, up: {{x: 0, y: 1, z: 0}} }}, dragmode: false
                         }},
-                        margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
+                        margin: {{l:0, r:0, b:0, t:0}}
                     }};
 
                     Plotly.newPlot('chart', data, layout);
