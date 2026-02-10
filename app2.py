@@ -5,7 +5,7 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：バックスピン定義・完全版")
+st.title("⚾ 投手分析：バックスピン・画面平行表示")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -46,26 +46,25 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転方向", f"{spin_str}")
 
-            # --- 回転軸の計算 ---
+            # --- 回転軸の計算（Z=0で画面に平行） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
                 angle_deg = (total_min / 720) * 360
                 angle_rad = np.deg2rad(angle_deg)
-                # 軸ベクトル
+                # Z成分を0に固定して画面と並行にする
                 axis = [float(np.sin(angle_rad)), float(np.cos(angle_rad)), 0.0]
             except:
                 axis = [0.0, 1.0, 0.0]
                 angle_rad = 0
 
-            # --- 縫い目の初期配置（バックスピン用） ---
+            # --- 縫い目の初期配置（バックスピン定義） ---
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
             
-            # 12:00で「右向きU字」の状態から、奥から手前に回るように座標を入れ替え
             pts = np.vstack([sz, -sx, sy]).T 
             norm = np.linalg.norm(pts, axis=1, keepdims=True)
             pts = pts / norm
@@ -99,11 +98,12 @@ if uploaded_file is not None:
                     }}
                 }}
 
+                // 画面（XY平面）に並行な黒い棒
                 var axis_line = {{
                     type: 'scatter3d', mode: 'lines',
                     x: [axis[0] * -1.6, axis[0] * 1.6],
                     y: [axis[1] * -1.6, axis[1] * 1.6],
-                    z: [axis[2] * -1.6, axis[2] * 1.6],
+                    z: [0, 0], 
                     line: {{color: '#000000', width: 12}}
                 }};
 
@@ -127,7 +127,7 @@ if uploaded_file is not None:
                         yaxis: {{visible: false, range: [-1.6, 1.6]}},
                         zaxis: {{visible: false, range: [-1.6, 1.6]}},
                         aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}} 
+                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}} // 正面視点
                     }},
                     margin: {{l:0, r:0, b:0, t:0}},
                     showlegend: false
@@ -136,12 +136,11 @@ if uploaded_file is not None:
                 Plotly.newPlot('chart', data, layout);
 
                 function update() {{
-                    // バックスピン（奥から手前）にするため、角度をプラス方向に
                     angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        // 縫い目を軸方向に傾けてから回転
+                        // 軸を画面に並行にするため [0,0,1] で初期傾斜を与える
                         var r_init = rotate(p, [0,0,1], {angle_rad}); 
                         var r = rotate(r_init, axis, angle);
                         
