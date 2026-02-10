@@ -220,10 +220,4 @@ with tab1:
                     Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                     requestAnimationFrame(update);
                 }}
-                update();
-            </script>
-            """
-            st.components.v1.html(html_code, height=600)
-
-else:
-    st.info("CSVファイルをアップロードしてください。")
+                
