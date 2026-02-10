@@ -81,7 +81,7 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (01:00 / 80% 効率)
+        # 3. スピンビジュアライザー (11:40 / 30% 効率)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -99,25 +99,26 @@ with tab1:
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 base_pts = np.vstack([sz, sx, sy]).T 
 
-                # --- 2. 回転方向の傾斜 (01:00 = 30deg) ---
-                tilt_deg = 30  
+                # --- 2. 回転方向の傾斜 (11:40 = -10deg) ---
+                # 12:00から反時計回りに10度 (1時間=30度なので、20分=10度)
+                tilt_deg = -10  
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
-                # --- 3. 回転効率の傾斜 (80% = ジャイロ角18deg) ---
-                eff = 80.0
+                # --- 3. 回転効率の傾斜 (30% = ジャイロ角63deg) ---
+                eff = 30.0
                 gyro_deg = (100 - eff) * 0.9  # 100%で0度, 0%で90度
                 gyro_rad = np.deg2rad(gyro_deg)
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                 
-                # 右投手は右側が奥（Y軸まわりに回転）
+                # 右投手は右側が奥へ
                 if hand == "右":
                     rot_gyro = np.array([[cos_g, 0, sin_g], [0, 1, 0], [-sin_g, 0, cos_g]])
                 else:
                     rot_gyro = np.array([[cos_g, 0, -sin_g], [0, 1, 0], [sin_g, 0, cos_g]])
 
-                # 全体の回転行列 (方向傾斜した後に奥行きをつける)
+                # 全体の回転行列
                 combined_rot = rot_gyro @ rot_z
 
                 # 軸と縫い目に適用
