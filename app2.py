@@ -63,13 +63,11 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
-        # カラム名のマッピングと数値変換
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 1. 球種別サマリー
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー (最大 & 平均)")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -80,7 +78,6 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-        # 2. ムーブメントチャート
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             st.subheader("📈 変化量マップ (ムーブメントチャート)")
@@ -93,31 +90,32 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (バックスピン方向 & U字位置固定)
+        # 3. スピンビジュアライザー (01:00 方向の実装)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
             if not valid_data.empty:
-                available_types = sorted(valid_data['Pitch Type'].unique())
-                selected_type = st.selectbox("球種を選択:", available_types)
-                
+                selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 
-                # --- 縫い目定義 (U字が正面を向き、軸[1,0,0]が中心を貫く配置) ---
+                # --- 縫い目定義 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                
-                # 座標スタック: szをX(軸方向)に持ってくることで、Uの字を維持したまま回転させる
                 pts = np.vstack([sz, sx, sy]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # 回転軸は真横 (X軸)
-                axis = [1.0, 0.0, 0.0]
+                # --- 回転軸の計算 (01:00 = 30度傾斜) ---
+                # 12:00 = [1, 0, 0] (真横)
+                # 01:00 = 30度時計回りに回転
+                tilt_deg = 30  
+                tilt_rad = np.deg2rad(tilt_deg)
+                # 正面(Z=2.2)から見て、X軸が cos(30), Y軸が -sin(30) になるように設定
+                axis = [float(np.cos(tilt_rad)), float(-np.sin(tilt_rad)), 0.0]
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
@@ -150,7 +148,7 @@ with tab1:
                     var data = [
                         {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6 }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 30}} }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [-1.7, 1.7], y: [0, 0], z: [0, 0], line: {{color: '#000000', width: 15}} }}
+                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [0, 0], line: {{color: '#000000', width: 15}} }}
                     ];
 
                     var layout = {{
@@ -164,7 +162,6 @@ with tab1:
                     Plotly.newPlot('chart', data, layout);
 
                     function update() {{
-                        // バックスピン方向：angleをプラス方向に加算
                         angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
