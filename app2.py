@@ -22,9 +22,7 @@ if 'stored_data' not in st.session_state:
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
-# ==========================================
-# タブ2：データ登録 (そのまま)
-# ==========================================
+# --- タブ2：データ登録 (維持) ---
 with tab2:
     st.header("選手データ登録")
     col_reg1, col_reg2 = st.columns(2)
@@ -47,9 +45,7 @@ with tab2:
             except Exception as e:
                 st.error(f"エラー: {e}")
 
-# ==========================================
-# タブ1：分析フィードバック
-# ==========================================
+# --- タブ1：分析フィードバック ---
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
@@ -68,7 +64,6 @@ with tab1:
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 1. サマリー表示 (そのまま)
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー (最大 & 平均)")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -79,7 +74,6 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-        # 2. 変化量マップ (復元)
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             st.subheader("📈 変化量マップ (ムーブメントチャート)")
@@ -92,7 +86,7 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー (位置関係の再調整)
+        # 4. スピンビジュアライザー (サイドスピンU字維持版)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -109,12 +103,13 @@ with tab1:
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 
-                # 軸[1, 0, 0]が Uの開口部の中心 と 膨らみの頂点 を貫くように配置
-                # 座標を入れ替えて、X軸がUのど真ん中を刺すように調整
-                pts = np.vstack([sx, sy, sz]).T 
+                # U字を「正面」に向けるために座標軸を回転
+                # X軸(黒い棒)を中心に回転させるのではなく、Y軸を「奥行き」にして
+                # 縫い目が常にサイド（横）から見てU字に見える配置
+                pts = np.vstack([sz, sx, sy]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # まずは水平[1, 0, 0]で固定
+                # 水平な回転軸
                 axis = [1.0, 0.0, 0.0]
 
                 html_code = f"""
