@@ -5,12 +5,11 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：総合データ解析ダッシュボード")
+st.title("⚾ 投手分析：縫い目・回転方向 完全定義版")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
-    # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
@@ -18,9 +17,8 @@ if uploaded_file is not None:
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # 2. 統計テーブル
     if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-        st.subheader("📊 球種別データサマリー (最大 & 平均)")
+        st.subheader("📊 球種別データサマリー")
         stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
         stats_df = stats_group.reset_index()
         new_columns = ['球種']
@@ -29,20 +27,6 @@ if uploaded_file is not None:
         stats_df.columns = new_columns
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-    # 3. 変化量グラフ (白背景)
-    if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
-        st.divider()
-        st.subheader("📈 変化量マップ (ムーブメントチャート)")
-        fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
-                           hover_data=['Velocity', 'Total Spin'],
-                           labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
-        fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
-                           xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                           yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                           height=600)
-        st.plotly_chart(fig_map, use_container_width=True)
-
-    # 4. スピンビジュアライザー (定義遵守アップデート)
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -62,28 +46,32 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転方向", f"{spin_str}")
 
-            # --- 回転軸の定義を修正 ---
-            # 12時(0:00)を真上(Y軸正)にする。時計回りに角度が増える定義。
+            # --- 回転軸の計算（定義通り） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
-                # 時計の12時は数学的0度(真上)にするため -total_min を使用し、さらに90度回転の調整を排除
-                angle_rad = (total_min / 720) * 2 * np.pi
-                # 軸ベクトル: X = sin(theta), Y = cos(theta)
-                # これで 12:00 -> [0, 1, 0], 3:00 -> [1, 0, 0], 6:00 -> [0, -1, 0], 9:00 -> [-1, 0, 0]
+                # 角度（12:00 = 0度）
+                angle_deg = (total_min / 720) * 360
+                angle_rad = np.deg2rad(angle_deg)
+                # 軸ベクトル：常に画面に並行な面(XY面)での軸
                 axis = [float(np.sin(angle_rad)), float(np.cos(angle_rad)), 0.0]
             except:
                 axis = [0.0, 1.0, 0.0]
+                angle_rad = 0
 
-            # 縫い目データ
+            # --- 縫い目データの初期配置調整 ---
+            # 12:00の時に「右に倒れたU字」にするための初期回転
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-            norm = np.sqrt(sx**2 + sy**2 + sz**2)
-            # 初期状態を調整
-            pts = np.vstack([sx/norm, sy/norm, sz/norm]).T 
+            
+            # 基本の縫い目を90度回転させて「右に倒れたU字」をデフォルトにする
+            # 12:00の状態（軸が垂直）で、2本の並行線が地面と水平
+            pts = np.vstack([sz, sx, -sy]).T 
+            norm = np.linalg.norm(pts, axis=1, keepdims=True)
+            pts = pts / norm
             seam_points = pts.tolist()
 
             html_code = f"""
@@ -110,9 +98,7 @@ if uploaded_file is not None:
                     var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                     for(var j=0; j<=n; j++) {{
                         var u = 2 * Math.PI * j / n;
-                        bx[i][j] = Math.cos(u) * Math.sin(v); 
-                        by[i][j] = Math.sin(u) * Math.sin(v); 
-                        bz[i][j] = Math.cos(v);
+                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
                     }}
                 }}
 
@@ -144,7 +130,7 @@ if uploaded_file is not None:
                         yaxis: {{visible: false, range: [-1.6, 1.6]}},
                         zaxis: {{visible: false, range: [-1.6, 1.6]}},
                         aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}} // 捕手視点
+                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}} 
                     }},
                     margin: {{l:0, r:0, b:0, t:0}},
                     showlegend: false
@@ -153,12 +139,17 @@ if uploaded_file is not None:
                 Plotly.newPlot('chart', data, layout);
 
                 function update() {{
-                    angle += (rpm / 60) * (2 * Math.PI) / 1000; 
+                    // 手前から奥（下方向）への回転を実現するために角度をマイナス方向に
+                    angle -= (rpm / 60) * (2 * Math.PI) / 1000; 
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        var r = rotate([p[0]*1.02, p[1]*1.02, p[2]*1.02], axis, angle);
-                        rx.push(r[0]); ry.push(r[1]); rz.push(r[2]);
+                        // 1. 縫い目自体を回転軸の方向に合わせて傾ける
+                        // 2. その後、軸周りに回転させる
+                        var r_init = rotate(p, [0,0,1], {angle_rad}); // 軸の傾き分だけ先に縫い目を傾ける
+                        var r = rotate(r_init, axis, angle);
+                        
+                        rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                         if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                     }}
                     Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
@@ -168,6 +159,3 @@ if uploaded_file is not None:
             </script>
             """
             st.components.v1.html(html_code, height=600)
-
-else:
-    st.info("CSVファイルをアップロードしてください。")
