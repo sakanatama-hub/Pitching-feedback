@@ -22,7 +22,7 @@ if 'stored_data' not in st.session_state:
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
 # ==========================================
-# タブ2：データ登録
+# タブ2：データ登録 (Excel/CSV対応)
 # ==========================================
 with tab2:
     st.header("選手データ登録")
@@ -47,7 +47,7 @@ with tab2:
                 st.error(f"エラー: {e}")
 
 # ==========================================
-# タブ1：分析フィードバック
+# タブ1：分析フィードバック (修正ポイント)
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
@@ -62,11 +62,13 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
+        # 数値変換
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # 1. 統計サマリー
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -77,6 +79,7 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
+        # 2. 変化量チャート
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
@@ -87,7 +90,7 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
-        # --- 指定されたコードを1文字残さず復元したビジュアル部分 ---
+        # 3. ビジュアライザー (完璧な定義の復元)
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -96,53 +99,50 @@ with tab1:
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 try:
-                    eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
-                    avg_eff = eff_data.mean() if not eff_data.empty else 100.0
+                    eff_val = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
+                    avg_eff = eff_val.mean() if not eff_val.empty else 100.0
                 except:
                     avg_eff = 100.0
                 
                 spin_str = str(type_subset.iloc[0]['Spin Direction'])
                 hand = PLAYER_HANDS.get(display_player, "右")
 
-                st.subheader(f"🔄 {selected_type} の回転詳細")
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("平均回転数", f"{int(avg_rpm)} rpm")
-                col_b.metric("代表的な回転方向", f"{spin_str}")
-                col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
-
-                # --- あなたが送ってくれた「完璧なロジック」そのまま ---
+                st.subheader(f"🔄 {selected_type} の回転詳細 ({hand}投げ)")
+                
+                # --- 完璧な物理計算の復元 ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
+                    # 12:00を0度として、時計回りに回転方向を定義
                     direction_deg = (total_min / 720) * 360
+                    direction_rad = np.deg2rad(direction_deg)
                     
-                    axis_deg = direction_deg + 90
-                    axis_rad = np.deg2rad(axis_deg)
+                    # 軸の基本ベクトル（XY平面：12時なら水平[1,0,0]）
+                    base_x = np.cos(direction_rad)
+                    base_y = -np.sin(direction_rad)
+                    
+                    # 効率による奥行き(Z)への倒れ込み（ジャイロ角）
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                     
-                    base_x = np.sin(axis_rad)
-                    base_y = np.cos(axis_rad)
+                    # 右投げ：効率が下がると右端が奥(Z-)、左投げ：左端が奥(Z-)
+                    eff_ratio = avg_eff / 100.0
+                    gyro_component = np.sin(gyro_angle_rad)
+                    if hand == "左":
+                        gyro_component = -gyro_component
                     
-                    if hand == "右":
-                        z_val = -np.sin(gyro_angle_rad) 
-                    else:
-                        z_val = np.sin(gyro_angle_rad)
-
-                    # ここが重要：効率に応じて軸が傾く完璧な定義
-                    axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
-                    direction_rad = np.deg2rad(direction_deg)
+                    axis = [float(base_x * eff_ratio), float(base_y * eff_ratio), float(gyro_component)]
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # --- 縫い目配置の完璧な定義 [sy, -sz, sx] ---
+                # 縫い目定義（串刺し：軸がU字の頂点を貫く）
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sy, -sz, sx]).T 
-                norm = np.linalg.norm(pts, axis=1, keepdims=True)
-                seam_points = (pts / norm).tolist()
+                # [横, 前後, 縦] の順で構成し、初期軸と縫い目頂点を合わせる
+                pts = np.vstack([sx, sz, sy]).T 
+                seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
@@ -155,7 +155,6 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
-                        var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
                         var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                         var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
@@ -194,9 +193,7 @@ with tab1:
                         angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
-                            var p = seam_base.seam[i];
-                            var r_init = rotate(p, [0,0,1], {direction_rad}); 
-                            var r = rotate(r_init, axis, angle);
+                            var r = rotate(seam_base.seam[i], axis, angle);
                             rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                             if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                         }}
