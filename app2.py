@@ -87,7 +87,7 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
-        # --- ここから「完璧だったコード」のロジックのみを抽出して差し替え ---
+        # --- 指定されたコードを1文字残さず復元したビジュアル部分 ---
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -110,11 +110,12 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-                # --- 回転軸の計算（完璧だったVerをそのまま採用） ---
+                # --- あなたが送ってくれた「完璧なロジック」そのまま ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
                     direction_deg = (total_min / 720) * 360
+                    
                     axis_deg = direction_deg + 90
                     axis_rad = np.deg2rad(axis_deg)
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
@@ -127,12 +128,13 @@ with tab1:
                     else:
                         z_val = np.sin(gyro_angle_rad)
 
+                    # ここが重要：効率に応じて軸が傾く完璧な定義
                     axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
                     direction_rad = np.deg2rad(direction_deg)
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # --- 縫い目配置（完璧だった並び [sy, -sz, sx] を厳守） ---
+                # --- 縫い目配置の完璧な定義 [sy, -sz, sx] ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -153,6 +155,7 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
+                        var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
                         var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                         var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
