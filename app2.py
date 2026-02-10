@@ -8,14 +8,12 @@ from datetime import date
 st.set_page_config(layout="wide")
 
 # --- 設定・データ準備 ---
-# 利き腕判定用（新規選手分）
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 凌久": "右", "#13 細川 拓哉": "右", "#14 ヴァデルナ・フェルガス": "左",
     "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", "#17 加藤 泰靖": "右", "#18 市川 祐": "右",
     "#19 高尾 響": "右", "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
 }
 
-# 選択肢はこのリストのみに限定
 ALL_PLAYER_NAMES = [
     "#11 大栄 陽斗", "#12 村上 凌久", "#13 細川 拓哉", "#14 ヴァデルナ・フェルガス",
     "#15 渕上 佳輝", "#16 後藤 凌寿", "#17 加藤 泰靖", "#18 市川 祐",
@@ -36,23 +34,34 @@ with tab2:
     with col_reg1:
         target_player = st.selectbox("選手を選択", ALL_PLAYER_NAMES)
         target_date = st.date_input("測定日を選択", date.today())
-    uploaded_file = st.file_uploader("CSVファイルをアップロード", type='csv', key="uploader_tab2")
+    
+    # Excelファイル(.xlsx, .xls)を型に追加
+    uploaded_file = st.file_uploader("ファイルをアップロード (CSV または Excel)", type=['csv', 'xlsx', 'xls'], key="uploader_tab2")
 
     if uploaded_file is not None:
         if st.button("データを登録する"):
-            new_df = pd.read_csv(uploaded_file, skiprows=4)
-            if target_player not in st.session_state['stored_data']:
-                st.session_state['stored_data'][target_player] = {}
-            st.session_state['stored_data'][target_player][str(target_date)] = new_df
-            st.success(f"{target_player} の {target_date} 分のデータを登録しました！")
+            # ファイル形式に応じて読み込み方法を分岐
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    new_df = pd.read_csv(uploaded_file, skiprows=4)
+                else:
+                    # Excelの場合も同様に4行スキップ
+                    new_df = pd.read_excel(uploaded_file, skiprows=4)
+                
+                if target_player not in st.session_state['stored_data']:
+                    st.session_state['stored_data'][target_player] = {}
+                st.session_state['stored_data'][target_player][str(target_date)] = new_df
+                st.success(f"{target_player} の {target_date} 分のデータを登録しました！")
+            except Exception as e:
+                st.error(f"ファイルの読み込みに失敗しました: {e}")
 
 # ==========================================
-# タブ1：分析フィードバック
+# タブ1：分析フィードバック (コード維持)
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
-        st.info("まずは「データ登録」タブからCSVをアップロードしてください。")
+        st.info("まずは「データ登録」タブからファイルをアップロードしてください。")
     else:
         sel_col1, sel_col2 = st.columns(2)
         with sel_col1:
