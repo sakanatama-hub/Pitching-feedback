@@ -87,7 +87,7 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
-        # --- 指定された「完璧なコード」の回転詳細部分をここから移植 ---
+        # --- ここから「完璧だったコード」のロジックのみを抽出して差し替え ---
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -95,13 +95,12 @@ with tab1:
                 selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
-                
                 try:
                     eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
                     avg_eff = eff_data.mean() if not eff_data.empty else 100.0
                 except:
                     avg_eff = 100.0
-                    
+                
                 spin_str = str(type_subset.iloc[0]['Spin Direction'])
                 hand = PLAYER_HANDS.get(display_player, "右")
 
@@ -111,12 +110,11 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-                # --- 回転軸の計算（移植） ---
+                # --- 回転軸の計算（完璧だったVerをそのまま採用） ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
                     direction_deg = (total_min / 720) * 360
-                    
                     axis_deg = direction_deg + 90
                     axis_rad = np.deg2rad(axis_deg)
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
@@ -134,7 +132,7 @@ with tab1:
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # --- 縫い目配置（移植） ---
+                # --- 縫い目配置（完璧だった並び [sy, -sz, sx] を厳守） ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -155,7 +153,6 @@ with tab1:
 
                     function rotate(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a);
-                        var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
                         var len = Math.sqrt(ax[0]*ax[0] + ax[1]*ax[1] + ax[2]*ax[2]);
                         var ux = ax[0]/len, uy = ax[1]/len, uz = ax[2]/len;
                         return [
@@ -175,16 +172,9 @@ with tab1:
                     }}
 
                     var data = [
-                        {{ 
-                            type: 'surface', x: bx, y: by, z: bz, 
-                            colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
-                            showscale: false, opacity: 0.6,
-                            lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
-                        }},
+                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6, lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
-                        {{ type: 'scatter3d', mode: 'lines',
-                          x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7],
-                          line: {{color: '#000000', width: 15}} }}
+                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
                     ];
 
                     var layout = {{
