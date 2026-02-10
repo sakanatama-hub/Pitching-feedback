@@ -5,11 +5,12 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：XY平面固定・スピン解析")
+st.title("⚾ 投手分析：総合データ解析ダッシュボード")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
+    # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
@@ -17,9 +18,34 @@ if uploaded_file is not None:
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # 2. 統計テーブル
+    if 'Pitch Type' in df.columns and len(existing_cols) > 0:
+        st.subheader("📊 球種別データサマリー (最大 & 平均)")
+        stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
+        new_columns = ['球種']
+        for col, stat in stats_group.columns:
+            new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
+        stats_df = stats_group.reset_index()
+        stats_df.columns = new_columns
+        st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+
+    # 3. 変化量グラフ (白背景)
+    if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
+        st.divider()
+        st.subheader("📈 変化量マップ (ムーブメントチャート)")
+        fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
+                           hover_data=['Velocity', 'Total Spin'],
+                           labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
+        fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                           xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                           yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                           height=600)
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    # 4. スピンビジュアライザー
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
+        st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
-        
         if not valid_data.empty:
             available_types = sorted(valid_data['Pitch Type'].unique())
             selected_type = st.selectbox("確認する球種を選択:", available_types)
@@ -30,30 +56,28 @@ if uploaded_file is not None:
             spin_str = str(rep_data['Spin Direction'])
             rpm = float(avg_rpm)
 
-            # --- 回転軸の計算（XY平面上に固定） ---
+            st.subheader(f"🔄 {selected_type} の回転詳細")
+            col_a, col_b = st.columns(2)
+            col_a.metric("平均回転数", f"{int(rpm)} rpm")
+            col_b.metric("代表的な回転方向", f"{spin_str}")
+
+            # 回転軸計算 (XY平面に平行)
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
-                # Rapsodo定義: 12:00が真上(Y軸+)。時計回りに角度が増える。
-                # 角度をラジアンに変換
                 angle_deg = (total_min / 720) * 360
                 angle_rad_axis = np.deg2rad(angle_deg)
-                
-                # XY平面上の軸ベクトル (Zは0に固定)
-                # 12:00 -> [0, 1, 0], 3:00 -> [1, 0, 0], 6:00 -> [0, -1, 0]
                 axis = [float(np.sin(angle_rad_axis)), float(np.cos(angle_rad_axis)), 0.0]
             except:
                 axis = [0.0, 1.0, 0.0]
                 angle_rad_axis = 0
 
-            # --- 縫い目の初期配置（バックスピン定義） ---
+            # 縫い目データ（バックスピン初期姿勢）
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-            
-            # 初期状態で12:00バックスピン（右向きU字）になる配置
             pts = np.vstack([sz, -sx, sy]).T 
             norm = np.linalg.norm(pts, axis=1, keepdims=True)
             pts = pts / norm
@@ -83,20 +107,9 @@ if uploaded_file is not None:
                     var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                     for(var j=0; j<=n; j++) {{
                         var u = 2 * Math.PI * j / n;
-                        bx[i][j] = Math.cos(u) * Math.sin(v); 
-                        by[i][j] = Math.sin(u) * Math.sin(v); 
-                        bz[i][j] = Math.cos(v);
+                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
                     }}
                 }}
-
-                // XY平面（Z=0）に配置される回転軸（黒い棒）
-                var axis_line = {{
-                    type: 'scatter3d', mode: 'lines',
-                    x: [axis[0] * -1.7, axis[0] * 1.7],
-                    y: [axis[1] * -1.7, axis[1] * 1.7],
-                    z: [0, 0],
-                    line: {{color: '#000000', width: 15}}
-                }};
 
                 var data = [
                     {{
@@ -109,7 +122,11 @@ if uploaded_file is not None:
                         type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
                         line: {{color: '#BC1010', width: 35}}
                     }},
-                    axis_line
+                    {{
+                        type: 'scatter3d', mode: 'lines',
+                        x: [axis[0] * -1.7, axis[0] * 1.7], y: [axis[1] * -1.7, axis[1] * 1.7], z: [0, 0],
+                        line: {{color: '#000000', width: 15}}
+                    }}
                 ];
 
                 var layout = {{
@@ -118,14 +135,10 @@ if uploaded_file is not None:
                         yaxis: {{visible: false, range: [-1.7, 1.7]}},
                         zaxis: {{visible: false, range: [-1.7, 1.7]}},
                         aspectmode: 'cube',
-                        camera: {{
-                            eye: {{x: 0, y: 0, z: 2.0}}, // Z軸の正面（画面手前）から見る
-                            up: {{x: 0, y: 1, z: 0}}     // Y軸を上にする
-                        }},
-                        dragmode: false // 視点がズレないように固定
+                        camera: {{ eye: {{x: 0, y: 0, z: 2.0}}, up: {{x: 0, y: 1, z: 0}} }},
+                        dragmode: false
                     }},
-                    margin: {{l:0, r:0, b:0, t:0}},
-                    showlegend: false
+                    margin: {{l:0, r:0, b:0, t:0}}, showlegend: false
                 }};
 
                 Plotly.newPlot('chart', data, layout);
@@ -135,11 +148,8 @@ if uploaded_file is not None:
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        // 1. 軸の傾きに合わせて縫い目を配置
                         var r_init = rotate(p, [0,0,1], {angle_rad_axis}); 
-                        // 2. その軸(axis)周りに回転
                         var r = rotate(r_init, axis, angle);
-                        
                         rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
                         if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                     }}
@@ -150,3 +160,6 @@ if uploaded_file is not None:
             </script>
             """
             st.components.v1.html(html_code, height=600)
+
+else:
+    st.info("CSVファイルをアップロードしてください。")
