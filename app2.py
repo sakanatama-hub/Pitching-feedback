@@ -5,7 +5,7 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：ジャイロ回転・効率加味モデル")
+st.title("⚾ 投手分析：総合データ解析ダッシュボード")
 
 # 保存された利き腕情報
 PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚 武蔵": "左", "#4 北村 祥治": "右", "#5 前田 健伸": "左", "#6 佐藤 勇基": "右", "#7 西村 友哉": "右", "#8 和田 佳大": "左", "#9 今泉 颯太": "右", "#10 福井 章吾": "左", "#22 高祖 健輔": "左", "#23 箱山 遥人": "右", "#24 坂巻 尚哉": "右", "#26 西村 彰浩": "左", "#27 小畑 尋規": "右", "#28 宮崎 仁斗": "右", "#29 徳本 健太朗": "左", "#39 柳 元珍": "左", "#99 尾瀬 雄大": "左"}
@@ -13,6 +13,7 @@ PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
+    # 1. データ読み込み
     df = pd.read_csv(uploaded_file, skiprows=4)
     
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
@@ -20,6 +21,31 @@ if uploaded_file is not None:
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # 2. 統計テーブル
+    if 'Pitch Type' in df.columns and len(existing_cols) > 0:
+        st.subheader("📊 球種別データサマリー (最大 & 平均)")
+        stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
+        stats_df = stats_group.reset_index()
+        new_columns = ['球種']
+        for col, stat in stats_group.columns:
+            new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
+        stats_df.columns = new_columns
+        st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+
+    # 3. 変化量グラフ (白背景)
+    if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
+        st.divider()
+        st.subheader("📈 変化量マップ (ムーブメントチャート)")
+        fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
+                           hover_data=['Velocity', 'Total Spin'],
+                           labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
+        fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                           xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                           yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                           height=600)
+        st.plotly_chart(fig_map, use_container_width=True)
+
+    # 4. スピンビジュアライザー
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -28,8 +54,9 @@ if uploaded_file is not None:
             selected_type = st.selectbox("球種を選択:", available_types)
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
-            
             avg_rpm = type_subset['Total Spin'].mean()
+            
+            # K列(10)から効率を抽出
             try:
                 eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
                 avg_eff = eff_data.mean() if not eff_data.empty else 100.0
@@ -39,6 +66,7 @@ if uploaded_file is not None:
             rep_data = type_subset.iloc[0]
             spin_str = str(rep_data['Spin Direction'])
             
+            # 利き腕判定
             hand = "右" 
             for name, side in PLAYER_HANDS.items():
                 if any(part in str(uploaded_file.name) for part in name.split()):
@@ -51,7 +79,7 @@ if uploaded_file is not None:
             col_b.metric("代表的な回転方向", f"{spin_str}")
             col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-            # --- 回転軸の計算（定義維持） ---
+            # --- 回転軸の計算（ジャイロ旋回定義・復元） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
@@ -64,6 +92,7 @@ if uploaded_file is not None:
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
+                # 右投手は反時計、左投手は時計回りに旋回（XZ平面）
                 if hand == "右":
                     z_val = -np.sin(gyro_angle_rad) 
                 else:
@@ -74,7 +103,7 @@ if uploaded_file is not None:
             except:
                 axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-            # 縫い目配置
+            # --- 縫い目配置（串刺し定義・復元） ---
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -118,8 +147,7 @@ if uploaded_file is not None:
                     {{ 
                         type: 'surface', x: bx, y: by, z: bz, 
                         colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
-                        showscale: false, 
-                        opacity: 0.6, // ボールを半透明にして奥の棒を見えるように修正
+                        showscale: false, opacity: 0.6,
                         lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
                     }},
                     {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
@@ -155,3 +183,6 @@ if uploaded_file is not None:
             </script>
             """
             st.components.v1.html(html_code, height=600)
+
+else:
+    st.info("CSVファイルをアップロードしてください。")
