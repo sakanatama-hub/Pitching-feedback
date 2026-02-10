@@ -22,7 +22,9 @@ if 'stored_data' not in st.session_state:
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
-# --- タブ2：データ登録 (変更なし) ---
+# ==========================================
+# タブ2：データ登録 (そのまま)
+# ==========================================
 with tab2:
     st.header("選手データ登録")
     col_reg1, col_reg2 = st.columns(2)
@@ -45,7 +47,9 @@ with tab2:
             except Exception as e:
                 st.error(f"エラー: {e}")
 
-# --- タブ1：分析フィードバック ---
+# ==========================================
+# タブ1：分析フィードバック
+# ==========================================
 with tab1:
     st.header("投球解析フィードバック")
     if not st.session_state['stored_data']:
@@ -59,19 +63,36 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
-        # (中略: データサマリーと変化量マップは維持)
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # 1. サマリー表示 (そのまま)
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-            st.subheader("📊 球種別データサマリー")
+            st.subheader("📊 球種別データサマリー (最大 & 平均)")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-            st.dataframe(stats_group, use_container_width=True)
+            stats_df = stats_group.reset_index()
+            new_columns = ['球種']
+            for col, stat in stats_group.columns:
+                new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
+            stats_df.columns = new_columns
+            st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+
+        # 2. 変化量マップ (復元)
+        if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
+            st.divider()
+            st.subheader("📈 変化量マップ (ムーブメントチャート)")
+            fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
+                               labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'})
+            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
+                               xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                               yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+                               height=600)
+            st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー (ここをリセット)
+        # 4. スピンビジュアライザー (位置関係の再調整)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -88,12 +109,12 @@ with tab1:
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
                 
-                # 軸を水平（X軸方向）に固定して位置関係を調整
-                # 縫い目の向きを調整し、X軸（黒い棒）がU字の頂点を通るように構成
-                pts = np.vstack([sy, sz, sx]).T 
+                # 軸[1, 0, 0]が Uの開口部の中心 と 膨らみの頂点 を貫くように配置
+                # 座標を入れ替えて、X軸がUのど真ん中を刺すように調整
+                pts = np.vstack([sx, sy, sz]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
-                # --- 回転軸（まずは水平[1, 0, 0]で固定して位置を確認） ---
+                # まずは水平[1, 0, 0]で固定
                 axis = [1.0, 0.0, 0.0]
 
                 html_code = f"""
