@@ -76,40 +76,31 @@ with tab1:
         df = st.session_state['stored_data'][display_player][display_date].copy()
         hand = PLAYER_HANDS.get(display_player, "右")
 
-        # --- 指定されたヘッダー名 ---
         c_dir = 'Spin Direction'
         c_rev = 'True Spin (release)'
         c_eff = 'Spin Efficiency (release)'
         c_vb = 'VB (trajectory)'
         c_hb = 'HB (trajectory)'
 
-        # 数値変換とクリーニング
         for c in [c_rev, c_eff, c_vb, c_hb]:
             if c in df.columns:
-                # %が入っている場合に備えて文字列置換してから数値化
                 df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-        # 1. サマリー表示
-        st.subheader("📊 球種別データサマリー (平均値)")
-        display_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
-        if 'Pitch Type' in df.columns and display_cols:
+        if 'Pitch Type' in df.columns:
+            st.subheader("📊 球種別データサマリー (平均値)")
+            display_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
             stats_group = df.groupby('Pitch Type')[display_cols].mean()
             st.dataframe(stats_group.style.format(precision=1), use_container_width=True)
 
-        # 2. ムーブメントチャート
         if c_vb in df.columns and c_hb in df.columns:
             st.divider()
             st.subheader("📈 変化量マップ")
-            fig_map = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type',
-                               labels={c_hb: '横変化 (cm)', c_vb: '縦変化 (cm)'})
-            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white',
-                               xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
-                               height=600)
+            fig_map = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type')
+            fig_map.update_layout(plot_bgcolor='white', paper_bgcolor='white', height=600)
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (実データ連動)
+        # 3. スピンビジュアライザー (逆回転ロジック搭載)
         # ==========================================
         if c_dir in df.columns and c_rev in df.columns:
             st.divider()
@@ -124,12 +115,16 @@ with tab1:
                 
                 avg_rpm = type_subset[c_rev].mean()
                 avg_eff = type_subset[c_eff].mean() if c_eff in type_subset.columns else 100.0
-                
-                # 回転方向は最初の有効なデータを使用
                 avg_dir_str = type_subset[c_dir].iloc[0] 
                 tilt_deg = time_to_degrees(avg_dir_str)
+
+                # --- 回転の「向き」を球種で判定 ---
+                # カット(Cut)、スライダー(Slider)、カーブ(Curve)系はトップスピン/ジャイロ成分として逆転させる判定
+                # ※現場の運用に合わせてキーワードを調整してください
+                is_reverse = any(keyword in selected_type.lower() for keyword in ["cut", "slider", "sl", "ct"])
+                spin_multiplier = -1 if is_reverse else 1
                 
-                st.write(f"**表示データ平均**: {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / 回転方向 {avg_dir_str}")
+                st.write(f"**表示データ平均**: {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / 回転方向 {avg_dir_str} ({'逆回転' if is_reverse else '正回転'})")
 
                 # --- 物理計算 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
@@ -164,6 +159,7 @@ with tab1:
                     var seam_base = {{ seam: {json.dumps(seam_points)} }};
                     var axis = {json.dumps(axis.tolist())};
                     var rpm = {avg_rpm};
+                    var multiplier = {spin_multiplier};
                     var angle = 0;
 
                     function rotate(p, ax, a) {{
@@ -203,7 +199,8 @@ with tab1:
                     Plotly.newPlot('chart', data, layout);
 
                     function update() {{
-                        angle += (rpm / 60) * (2 * Math.PI) / 1000; 
+                        // multiplierによって回転方向を切り替え
+                        angle += multiplier * (rpm / 60) * (2 * Math.PI) / 1000; 
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<seam_base.seam.length; i++) {{
                             var r = rotate(seam_base.seam[i], axis, angle);
