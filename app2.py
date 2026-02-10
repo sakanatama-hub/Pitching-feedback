@@ -54,27 +54,20 @@ if uploaded_file is not None:
         )
         
         fig_map.update_layout(
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            xaxis=dict(
-                zeroline=True, zerolinewidth=2, zerolinecolor='black', 
-                gridcolor='lightgray', range=[-60, 60]
-            ),
-            yaxis=dict(
-                zeroline=True, zerolinewidth=2, zerolinecolor='black', 
-                gridcolor='lightgray', range=[-60, 60]
-            ),
+            plot_bgcolor='white', paper_bgcolor='white',
+            xaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
+            yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='black', gridcolor='lightgray', range=[-60, 60]),
             height=600
         )
         st.plotly_chart(fig_map, use_container_width=True)
 
-    # 4. スピンビジュアライザー (画像再現アップデート)
+    # 4. スピンビジュアライザー (軸中心回転アップデート)
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
         
         if not valid_data.empty:
-            available_types = sorted(valid_data['Pitch Type'].unique()) if 'Pitch Type' in df.columns else []
+            available_types = sorted(valid_data['Pitch Type'].unique())
             selected_type = st.selectbox("確認する球種を選択:", available_types)
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
@@ -88,21 +81,25 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転軸", f"{spin_str} 方向")
 
+            # 回転軸の計算（12時方向が [0, 1, 0] になるように調整）
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
-                theta = (total_min / 720) * 2 * np.pi 
-                axis = [float(np.cos(theta)), 0.0, float(-np.sin(theta))]
+                # 時計の針の角度を計算
+                angle_rad = (total_min / 720) * 2 * np.pi
+                # 軸ベクトル：捕手視点
+                axis = [float(np.sin(angle_rad)), float(np.cos(angle_rad)), 0.0]
             except:
-                axis = [1.0, 0.0, 0.0]
+                axis = [0.0, 1.0, 0.0]
 
+            # 縫い目データ生成
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
             norm = np.sqrt(sx**2 + sy**2 + sz**2)
-            pts = np.vstack([sz/norm, sx/norm, sy/norm]).T 
+            pts = np.vstack([sx/norm, sy/norm, sz/norm]).T 
             seam_points = pts.tolist()
 
             html_code = f"""
@@ -114,6 +111,7 @@ if uploaded_file is not None:
                 var rpm = {rpm};
                 var angle = 0;
 
+                // ロドリゲスの回転公式を使用して、指定された軸(ax)の周りに点(p)を回転させる
                 function rotate(p, ax, a) {{
                     var c = Math.cos(a), s = Math.sin(a);
                     var dot = p[0]*ax[0] + p[1]*ax[1] + p[2]*ax[2];
@@ -129,43 +127,40 @@ if uploaded_file is not None:
                     var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                     for(var j=0; j<=n; j++) {{
                         var u = 2 * Math.PI * j / n;
-                        bx[i][j] = Math.cos(u) * Math.sin(v); 
-                        by[i][j] = Math.sin(u) * Math.sin(v); 
-                        bz[i][j] = Math.cos(v);
+                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
                     }}
                 }}
 
-                // --- 画像再現用の回転軸（黒い棒）の生成 ---
-                var axis_line_x = [axis[0] * -1.5, axis[0] * 1.5];
-                var axis_line_y = [axis[1] * -1.5, axis[1] * 1.5];
-                var axis_line_z = [axis[2] * -1.5, axis[2] * 1.5];
+                // 固定された回転軸（黒い棒）
+                var axis_line = {{
+                    type: 'scatter3d', mode: 'lines',
+                    x: [axis[0] * -1.6, axis[0] * 1.6],
+                    y: [axis[1] * -1.6, axis[1] * 1.6],
+                    z: [axis[2] * -1.6, axis[2] * 1.6],
+                    line: {{color: '#000000', width: 12}}
+                }};
 
                 var data = [
                     {{
                         type: 'surface', x: bx, y: by, z: bz,
                         colorscale: [['0', '#FFFFFF'], ['1', '#FFFFFF']],
                         showscale: false, opacity: 1.0,
-                        lighting: {{ambient: 0.85, diffuse: 0.45, specular: 0.05, roughness: 1.0}}
+                        lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
                     }},
                     {{
                         type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
-                        line: {{color: '#BC1010', width: 35}}
+                        line: {{color: '#BC1010', width: 30}}
                     }},
-                    {{
-                        // 回転軸の棒を追加
-                        type: 'scatter3d', mode: 'lines',
-                        x: axis_line_x, y: axis_line_y, z: axis_line_z,
-                        line: {{color: '#000000', width: 10}}
-                    }}
+                    axis_line
                 ];
 
                 var layout = {{
                     scene: {{
-                        xaxis: {{visible: false, range: [-1.5, 1.5]}},
-                        yaxis: {{visible: false, range: [-1.5, 1.5]}},
-                        zaxis: {{visible: false, range: [-1.5, 1.5]}},
+                        xaxis: {{visible: false, range: [-1.6, 1.6]}},
+                        yaxis: {{visible: false, range: [-1.6, 1.6]}},
+                        zaxis: {{visible: false, range: [-1.6, 1.6]}},
                         aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}}
+                        camera: {{eye: {{x: 1.2, y: 1.2, z: 1.2}}}}
                     }},
                     margin: {{l:0, r:0, b:0, t:0}},
                     showlegend: false
@@ -174,13 +169,15 @@ if uploaded_file is not None:
                 Plotly.newPlot('chart', data, layout);
 
                 function update() {{
-                    angle += (rpm / 60) * (2 * Math.PI) / 1200; 
+                    // 回転速度の調整
+                    angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        var r1 = rotate([p[0]*1.01, p[1]*1.01, p[2]*1.01], axis, angle);
-                        var r2 = rotate([p[0]*1.05, p[1]*1.05, p[2]*1.05], axis, angle);
-                        rx.push(r1[0], r2[0], null); ry.push(r1[1], r2[1], null); rz.push(r1[2], r2[2], null);
+                        // seam_baseの各点をaxis(黒い棒)を中心に回転させる
+                        var r = rotate([p[0]*1.02, p[1]*1.02, p[2]*1.02], axis, angle);
+                        rx.push(r[0]); ry.push(r[1]); rz.push(r[2]);
+                        if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                     }}
                     Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                     requestAnimationFrame(update);
