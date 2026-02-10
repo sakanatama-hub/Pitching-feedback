@@ -51,33 +51,24 @@ if uploaded_file is not None:
             col_b.metric("代表的な回転方向", f"{spin_str}")
             col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-            # --- 回転軸の計算（ジャイロ旋回定義の修正） ---
+            # --- 回転軸の計算（定義維持） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
                 direction_deg = (total_min / 720) * 360
                 
-                # XY平面上（100%効率）の軸角度
                 axis_deg = direction_deg + 90
                 axis_rad = np.deg2rad(axis_deg)
-                
-                # 効率によるジャイロ傾斜角（100%->0rad, 0%->π/2 rad）
                 gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                 
-                # 効率100%時の単位ベクトル
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
-                # XZ面上の旋回：右投手は反時計回り、左投手は時計回り
-                # 100%でZ=0, 0%でZ=1。XとYは効率(avg_eff/100)倍に縮小される
                 if hand == "右":
-                    # 右投手の反時計回り旋回 (Zをマイナス方向に振ることで右側が奥へ)
                     z_val = -np.sin(gyro_angle_rad) 
                 else:
-                    # 左投手の時計回り旋回 (Zをプラス方向に振ることで左側が奥へ)
                     z_val = np.sin(gyro_angle_rad)
 
-                # 最終的な3D回転軸：水平成分は効率(cos)に比例して短くなる
                 axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
                 direction_rad = np.deg2rad(direction_deg)
             except:
@@ -124,7 +115,13 @@ if uploaded_file is not None:
                 }}
 
                 var data = [
-                    {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 1.0 }},
+                    {{ 
+                        type: 'surface', x: bx, y: by, z: bz, 
+                        colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], 
+                        showscale: false, 
+                        opacity: 0.6, // ボールを半透明にして奥の棒を見えるように修正
+                        lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}}
+                    }},
                     {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
                     {{ type: 'scatter3d', mode: 'lines',
                       x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7],
