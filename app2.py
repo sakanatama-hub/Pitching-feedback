@@ -13,8 +13,10 @@ PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
 if uploaded_file is not None:
+    # 1. データ読み込み（4行スキップは維持）
     df = pd.read_csv(uploaded_file, skiprows=4)
     
+    # 統計用のマッピング
     col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
     existing_cols = [c for c in col_map.keys() if c in df.columns]
     for col in existing_cols:
@@ -29,15 +31,14 @@ if uploaded_file is not None:
             
             type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
             
-            # --- 平均回転効率の抽出（数値変換を確実に行う） ---
+            # --- 平均回転効率の抽出（K列 = インデックス10 を直接参照） ---
             avg_rpm = type_subset['Total Spin'].mean()
             
-            # Spin Efficiency カラムを数値化して平均を取る
-            if 'Spin Efficiency' in type_subset.columns:
-                # %記号などが混じっている可能性を考慮し、coerceで数値化
-                eff_series = pd.to_numeric(type_subset['Spin Efficiency'], errors='coerce').dropna()
-                avg_eff = eff_series.mean() if not eff_series.empty else 100.0
-            else:
+            try:
+                # iloc[:, 10] でK列を取得。数値化して平均。
+                eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
+                avg_eff = eff_data.mean() if not eff_data.empty else 100.0
+            except:
                 avg_eff = 100.0
                 
             rep_data = type_subset.iloc[0]
@@ -67,7 +68,7 @@ if uploaded_file is not None:
                 base_x = np.sin(axis_rad)
                 base_y = np.cos(axis_rad)
                 
-                # 効率によるジャイロ角度
+                # 効率によるジャイロ角度（100%->0, 0%->π/2）
                 gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                 
                 if hand == "右":
@@ -75,7 +76,7 @@ if uploaded_file is not None:
                 else:
                     z_factor = np.sin(gyro_angle_rad)
 
-                # 最終軸
+                # 最終軸（効率が下がるほど奥行きZが支配的になる）
                 axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_factor)]
                 direction_rad = np.deg2rad(direction_deg)
             except:
@@ -156,6 +157,3 @@ if uploaded_file is not None:
             </script>
             """
             st.components.v1.html(html_code, height=600)
-
-else:
-    st.info("CSVファイルをアップロードしてください。")
