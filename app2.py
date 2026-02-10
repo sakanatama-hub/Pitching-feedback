@@ -5,7 +5,7 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：総合データ解析ダッシュボート")
+st.title("⚾ 投手分析：総合データ解析ダッシュボード")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -39,7 +39,7 @@ if uploaded_file is not None:
         stats_df.columns = ['球種'] + new_columns
         st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-    # 3. 変化量グラフ (白背景・グリッド強調)
+    # 3. 変化量グラフ (白背景)
     if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
         st.divider()
         st.subheader("📈 変化量マップ (ムーブメントチャート)")
@@ -53,7 +53,6 @@ if uploaded_file is not None:
             labels={'HB (trajectory)': '横変化 (cm)', 'VB (trajectory)': '縦変化 (cm)', 'Pitch Type': '球種'},
         )
         
-        # 背景を白に、グリッドをグレーに設定
         fig_map.update_layout(
             plot_bgcolor='white',
             paper_bgcolor='white',
@@ -65,12 +64,11 @@ if uploaded_file is not None:
                 zeroline=True, zerolinewidth=2, zerolinecolor='black', 
                 gridcolor='lightgray', range=[-60, 60]
             ),
-            width=800,
             height=600
         )
         st.plotly_chart(fig_map, use_container_width=True)
 
-    # 4. スピンビジュアライザー (以前の安定版コード)
+    # 4. スピンビジュアライザー (画像再現アップデート)
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
         st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
@@ -90,7 +88,6 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転軸", f"{spin_str} 方向")
 
-            # 回転軸計算
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
@@ -99,7 +96,6 @@ if uploaded_file is not None:
             except:
                 axis = [1.0, 0.0, 0.0]
 
-            # 縫い目データ
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
@@ -109,7 +105,6 @@ if uploaded_file is not None:
             pts = np.vstack([sz/norm, sx/norm, sy/norm]).T 
             seam_points = pts.tolist()
 
-            # JSコード (波括弧のエスケープ済)
             html_code = f"""
             <div id="chart" style="width:100%; height:550px;"></div>
             <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -140,6 +135,11 @@ if uploaded_file is not None:
                     }}
                 }}
 
+                // --- 画像再現用の回転軸（黒い棒）の生成 ---
+                var axis_line_x = [axis[0] * -1.5, axis[0] * 1.5];
+                var axis_line_y = [axis[1] * -1.5, axis[1] * 1.5];
+                var axis_line_z = [axis[2] * -1.5, axis[2] * 1.5];
+
                 var data = [
                     {{
                         type: 'surface', x: bx, y: by, z: bz,
@@ -150,16 +150,22 @@ if uploaded_file is not None:
                     {{
                         type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
                         line: {{color: '#BC1010', width: 35}}
+                    }},
+                    {{
+                        // 回転軸の棒を追加
+                        type: 'scatter3d', mode: 'lines',
+                        x: axis_line_x, y: axis_line_y, z: axis_line_z,
+                        line: {{color: '#000000', width: 10}}
                     }}
                 ];
 
                 var layout = {{
                     scene: {{
-                        xaxis: {{visible: false, range: [-1.1, 1.1]}},
-                        yaxis: {{visible: false, range: [-1.1, 1.1]}},
-                        zaxis: {{visible: false, range: [-1.1, 1.1]}},
+                        xaxis: {{visible: false, range: [-1.5, 1.5]}},
+                        yaxis: {{visible: false, range: [-1.5, 1.5]}},
+                        zaxis: {{visible: false, range: [-1.5, 1.5]}},
                         aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.7, z: 0}}}}
+                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}}
                     }},
                     margin: {{l:0, r:0, b:0, t:0}},
                     showlegend: false
