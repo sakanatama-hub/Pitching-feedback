@@ -17,45 +17,35 @@ NEW_PLAYERS = [
 ]
 ALL_PLAYER_NAMES = sorted(list(PLAYER_HANDS.keys()) + NEW_PLAYERS)
 
-# セッション状態でのデータ蓄積用初期化
 if 'stored_data' not in st.session_state:
-    st.session_state['stored_data'] = {} # {選手名: {日付: DataFrame}}
+    st.session_state['stored_data'] = {}
 
-# --- タブ構成 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
 # ==========================================
-# タブ2：データ登録 (先にこちらでアップロード)
+# タブ2：データ登録
 # ==========================================
 with tab2:
     st.header("選手データ登録")
     col_reg1, col_reg2 = st.columns(2)
-    
     with col_reg1:
         target_player = st.selectbox("選手を選択", ALL_PLAYER_NAMES)
         target_date = st.date_input("測定日を選択", date.today())
-    
-    uploaded_file = st.file_uploader("CSVファイルをアップロード (Trackman等)", type='csv', key="uploader_tab2")
+    uploaded_file = st.file_uploader("CSVファイルをアップロード", type='csv', key="uploader_tab2")
 
     if uploaded_file is not None:
         if st.button("データを登録する"):
-            # データの読み込み
             new_df = pd.read_csv(uploaded_file, skiprows=4)
-            
-            # 登録処理
             if target_player not in st.session_state['stored_data']:
                 st.session_state['stored_data'][target_player] = {}
-            
             st.session_state['stored_data'][target_player][str(target_date)] = new_df
             st.success(f"{target_player} の {target_date} 分のデータを登録しました！")
 
 # ==========================================
-# タブ1：分析フィードバック (従来のコード)
+# タブ1：分析フィードバック
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
-    
-    # 登録済みデータから選択
     if not st.session_state['stored_data']:
         st.info("まずは「データ登録」タブからCSVをアップロードしてください。")
     else:
@@ -67,13 +57,11 @@ with tab1:
         
         df = st.session_state['stored_data'][display_player][display_date]
 
-        # --- 以下、従来の解析コード ---
         col_map = {'Velocity': '球速', 'Total Spin': '回転数', 'Spin Efficiency': 'スピン効率', 'VB (trajectory)': '縦変化量', 'HB (trajectory)': '横変化量'}
         existing_cols = [c for c in col_map.keys() if c in df.columns]
         for col in existing_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 統計テーブル
         if 'Pitch Type' in df.columns and len(existing_cols) > 0:
             st.subheader("📊 球種別データサマリー")
             stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
@@ -84,7 +72,6 @@ with tab1:
             stats_df.columns = new_columns
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-        # 変化量グラフ
         if 'VB (trajectory)' in df.columns and 'HB (trajectory)' in df.columns:
             st.divider()
             fig_map = px.scatter(df, x='HB (trajectory)', y='VB (trajectory)', color='Pitch Type',
@@ -95,14 +82,12 @@ with tab1:
                                height=500)
             st.plotly_chart(fig_map, use_container_width=True)
 
-        # スピンビジュアライザー
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
             valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
             if not valid_data.empty:
                 selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
-                
                 avg_rpm = type_subset['Total Spin'].mean()
                 try:
                     eff_data = pd.to_numeric(type_subset.iloc[:, 10], errors='coerce').dropna()
@@ -111,8 +96,6 @@ with tab1:
                     avg_eff = 100.0
                 
                 spin_str = str(type_subset.iloc[0]['Spin Direction'])
-                
-                # 利き腕判定 (PLAYER_HANDS辞書から取得)
                 hand = PLAYER_HANDS.get(display_player, "右")
 
                 st.subheader(f"🔄 {selected_type} の回転詳細 ({hand}投げ)")
@@ -121,7 +104,6 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-                # 回転軸計算
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
@@ -129,7 +111,6 @@ with tab1:
                     axis_deg = direction_deg + 90
                     axis_rad = np.deg2rad(axis_deg)
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
-                    
                     base_x, base_y = np.sin(axis_rad), np.cos(axis_rad)
                     z_val = -np.sin(gyro_angle_rad) if hand == "右" else np.sin(gyro_angle_rad)
                     axis = [float(base_x * (avg_eff/100.0)), float(base_y * (avg_eff/100.0)), float(z_val)]
@@ -137,7 +118,6 @@ with tab1:
                 except:
                     axis = [1.0, 0.0, 0.0]; direction_rad = 0
 
-                # 縫い目配置 (串刺し定義)
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx, sy = np.cos(t_st) + alpha * np.cos(3*t_st), np.sin(t_st) - alpha * np.sin(3*t_st)
@@ -145,6 +125,7 @@ with tab1:
                 pts = np.vstack([sy, -sz, sx]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
+                # JavaScript内の波括弧を二重にする（{{ }}）
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -172,7 +153,7 @@ with tab1:
                         }}
                     }}
                     var data = [
-                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6 }},
+                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6, lighting: {{ambient: 0.8, diffuse: 0.5, specular: 0.1, roughness: 1.0}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 35}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
                     ];
@@ -193,7 +174,7 @@ with tab1:
                         }
                         Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                         requestAnimationFrame(update);
-                    }
+                    }}
                     update();
                 </script>
                 """
