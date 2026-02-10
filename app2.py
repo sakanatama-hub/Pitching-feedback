@@ -5,7 +5,7 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：縫い目・回転方向 完全定義版")
+st.title("⚾ 投手分析：バックスピン定義・完全版")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -46,30 +46,27 @@ if uploaded_file is not None:
             col_a.metric("平均回転数", f"{int(rpm)} rpm")
             col_b.metric("代表的な回転方向", f"{spin_str}")
 
-            # --- 回転軸の計算（定義通り） ---
+            # --- 回転軸の計算 ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
-                # 角度（12:00 = 0度）
                 angle_deg = (total_min / 720) * 360
                 angle_rad = np.deg2rad(angle_deg)
-                # 軸ベクトル：常に画面に並行な面(XY面)での軸
+                # 軸ベクトル
                 axis = [float(np.sin(angle_rad)), float(np.cos(angle_rad)), 0.0]
             except:
                 axis = [0.0, 1.0, 0.0]
                 angle_rad = 0
 
-            # --- 縫い目データの初期配置調整 ---
-            # 12:00の時に「右に倒れたU字」にするための初期回転
+            # --- 縫い目の初期配置（バックスピン用） ---
             t_st = np.linspace(0, 2 * np.pi, 200)
             alpha = 0.4
             sx = np.cos(t_st) + alpha * np.cos(3*t_st)
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
             
-            # 基本の縫い目を90度回転させて「右に倒れたU字」をデフォルトにする
-            # 12:00の状態（軸が垂直）で、2本の並行線が地面と水平
-            pts = np.vstack([sz, sx, -sy]).T 
+            # 12:00で「右向きU字」の状態から、奥から手前に回るように座標を入れ替え
+            pts = np.vstack([sz, -sx, sy]).T 
             norm = np.linalg.norm(pts, axis=1, keepdims=True)
             pts = pts / norm
             seam_points = pts.tolist()
@@ -139,14 +136,13 @@ if uploaded_file is not None:
                 Plotly.newPlot('chart', data, layout);
 
                 function update() {{
-                    // 手前から奥（下方向）への回転を実現するために角度をマイナス方向に
-                    angle -= (rpm / 60) * (2 * Math.PI) / 1000; 
+                    // バックスピン（奥から手前）にするため、角度をプラス方向に
+                    angle += (rpm / 60) * (2 * Math.PI) / 1000; 
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        // 1. 縫い目自体を回転軸の方向に合わせて傾ける
-                        // 2. その後、軸周りに回転させる
-                        var r_init = rotate(p, [0,0,1], {angle_rad}); // 軸の傾き分だけ先に縫い目を傾ける
+                        // 縫い目を軸方向に傾けてから回転
+                        var r_init = rotate(p, [0,0,1], {angle_rad}); 
                         var r = rotate(r_init, axis, angle);
                         
                         rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
