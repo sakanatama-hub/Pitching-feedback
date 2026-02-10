@@ -90,7 +90,7 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 3. スピンビジュアライザー (01:00 方向の実装)
+        # 3. スピンビジュアライザー (01:00方向 & 縫い目同期修正版)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -100,29 +100,41 @@ with tab1:
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 avg_rpm = type_subset['Total Spin'].mean()
                 
-                # --- 縫い目定義 ---
+                # --- 1. 基本となる「12:00（水平軸）」での縫い目配置 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                pts = np.vstack([sz, sx, sy]).T 
-                seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
+                base_pts = np.vstack([sz, sx, sy]).T # 水平軸[1,0,0]用の初期配置
 
-                # --- 回転軸の計算 (01:00 = 30度傾斜) ---
-                # 12:00 = [1, 0, 0] (真横)
-                # 01:00 = 30度時計回りに回転
+                # --- 2. 角度（01:00 = 30度）に合わせて「軸」と「縫い目」の両方を回転させる ---
                 tilt_deg = 30  
                 tilt_rad = np.deg2rad(tilt_deg)
-                # 正面(Z=2.2)から見て、X軸が cos(30), Y軸が -sin(30) になるように設定
-                axis = [float(np.cos(tilt_rad)), float(-np.sin(tilt_rad)), 0.0]
+                
+                # 回転行列（Z軸まわり＝正面から見た傾き）
+                cos_t = np.cos(tilt_rad)
+                sin_t = np.sin(tilt_rad)
+                # 時計回りなので行列の符号を調整
+                rot_z = np.array([
+                    [cos_t,  sin_t, 0],
+                    [-sin_t, cos_t, 0],
+                    [0,      0,     1]
+                ])
+
+                # 軸の傾き計算
+                axis = rot_z @ np.array([1.0, 0.0, 0.0])
+                
+                # 縫い目データ全体を傾ける
+                tilted_pts = (base_pts @ rot_z.T)
+                seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
                 <script>
                     var seam_base = {{ seam: {json.dumps(seam_points)} }};
-                    var axis = {json.dumps(axis)};
+                    var axis = {json.dumps(axis.tolist())};
                     var rpm = {avg_rpm};
                     var angle = 0;
 
@@ -148,7 +160,7 @@ with tab1:
                     var data = [
                         {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#FFFFFF'],['1','#FFFFFF']], showscale: false, opacity: 0.6 }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 30}} }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [0, 0], line: {{color: '#000000', width: 15}} }}
+                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.7, axis[0]*1.7], y: [axis[1]*-1.7, axis[1]*1.7], z: [axis[2]*-1.7, axis[2]*1.7], line: {{color: '#000000', width: 15}} }}
                     ];
 
                     var layout = {{
