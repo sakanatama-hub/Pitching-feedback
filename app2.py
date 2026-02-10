@@ -7,8 +7,13 @@ from datetime import date
 
 st.set_page_config(layout="wide")
 
-# --- 設定・データ準備 ---
-PLAYER_HANDS = {"#1 熊田 任洋": "左", "#2 逢澤 崚介": "左", "#3 三塚 武蔵": "左", "#4 北村 祥治": "右", "#5 前田 健伸": "左", "#6 佐藤 勇基": "右", "#7 西村 友哉": "右", "#8 和田 佳大": "左", "#9 今泉 颯太": "右", "#10 福井 章吾": "左", "#22 高祖 健輔": "左", "#23 箱山 遥人": "右", "#24 坂巻 尚哉": "右", "#26 西村 彰浩": "左", "#27 小畑 尋規": "右", "#28 宮崎 仁斗": "右", "#29 徳本 健太朗": "左", "#39 柳 元珍": "左", "#99 尾瀬 雄大": "左"}
+# --- 設定・データ準備 (投手リストに更新) ---
+PLAYER_HANDS = {
+    "#11 大栄 陽斗": "右", "#12 村上 凌久": "右", "#13 細川 拓哉": "右", 
+    "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
+    "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", 
+    "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
+}
 
 ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
@@ -85,7 +90,7 @@ with tab1:
             st.plotly_chart(fig_map, use_container_width=True)
 
         # ==========================================
-        # 4. スピンビジュアライザー
+        # 4. スピンビジュアライザー (物理定義復元版)
         # ==========================================
         if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
             st.divider()
@@ -113,39 +118,33 @@ with tab1:
                 col_b.metric("代表的な回転方向", f"{spin_str}")
                 col_c.metric("平均回転効率", f"{avg_eff:.1f} %")
 
-                # --- 回転軸の計算（時計の針の挙動と効率による奥行きの再現） ---
+                # --- 回転軸の計算 ---
                 try:
                     hour, minute = map(int, spin_str.split(':'))
                     total_min = (hour % 12) * 60 + minute
-                    # 12:00で水平、時計回りに回転
                     direction_deg = (total_min / 720) * 360
                     direction_rad = np.deg2rad(direction_deg)
                     
-                    # 軸の基本成分（XY平面）
                     base_x = np.cos(direction_rad)
                     base_y = -np.sin(direction_rad)
                     
-                    # 効率による奥行き(Z)への傾斜
                     gyro_angle_rad = np.arccos(np.clip(avg_eff / 100.0, 0, 1))
                     eff_ratio = avg_eff / 100.0
                     z_val = np.sin(gyro_angle_rad)
                     
-                    # 右投手：右端が奥(Z-)、左投手：左端が奥(Z-)への調整
                     if hand == "右":
-                        # 3時方向(垂直)の時に右端（下側）が奥に行くように
                         axis = [float(base_x * eff_ratio), float(base_y * eff_ratio), float(-z_val)]
                     else:
                         axis = [float(base_x * eff_ratio), float(base_y * eff_ratio), float(z_val)]
                 except:
                     axis = [1.0, 0.0, 0.0]
 
-                # --- 縫い目配置（串刺し位置の固定） ---
+                # --- 縫い目配置 ---
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx = np.cos(t_st) + alpha * np.cos(3*t_st)
                 sy = np.sin(t_st) - alpha * np.sin(3*t_st)
                 sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
-                # 横, 前後, 縦 の順で構成
                 pts = np.vstack([sx, sz, sy]).T 
                 seam_points = (pts / np.linalg.norm(pts, axis=1, keepdims=True)).tolist()
 
