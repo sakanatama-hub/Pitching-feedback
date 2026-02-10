@@ -5,7 +5,7 @@ import json
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("⚾ 投手分析：バックスピン・画面平行表示")
+st.title("⚾ 投手分析：XY平面固定・スピン解析")
 
 uploaded_file = st.file_uploader("CSVをアップロード", type='csv')
 
@@ -17,18 +17,7 @@ if uploaded_file is not None:
     for col in existing_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    if 'Pitch Type' in df.columns and len(existing_cols) > 0:
-        st.subheader("📊 球種別データサマリー")
-        stats_group = df.groupby('Pitch Type')[existing_cols].agg(['max', 'mean'])
-        stats_df = stats_group.reset_index()
-        new_columns = ['球種']
-        for col, stat in stats_group.columns:
-            new_columns.append(f"{col_map.get(col, col)}({'最大' if stat=='max' else '平均'})")
-        stats_df.columns = new_columns
-        st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
-
     if 'Spin Direction' in df.columns and 'Total Spin' in df.columns:
-        st.divider()
         valid_data = df.dropna(subset=['Spin Direction', 'Total Spin'])
         
         if not valid_data.empty:
@@ -41,22 +30,21 @@ if uploaded_file is not None:
             spin_str = str(rep_data['Spin Direction'])
             rpm = float(avg_rpm)
 
-            st.subheader(f"🔄 {selected_type} の回転詳細")
-            col_a, col_b = st.columns(2)
-            col_a.metric("平均回転数", f"{int(rpm)} rpm")
-            col_b.metric("代表的な回転方向", f"{spin_str}")
-
-            # --- 回転軸の計算（Z=0で画面に平行） ---
+            # --- 回転軸の計算（XY平面上に固定） ---
             try:
                 hour, minute = map(int, spin_str.split(':'))
                 total_min = (hour % 12) * 60 + minute
+                # Rapsodo定義: 12:00が真上(Y軸+)。時計回りに角度が増える。
+                # 角度をラジアンに変換
                 angle_deg = (total_min / 720) * 360
-                angle_rad = np.deg2rad(angle_deg)
-                # Z成分を0に固定して画面と並行にする
-                axis = [float(np.sin(angle_rad)), float(np.cos(angle_rad)), 0.0]
+                angle_rad_axis = np.deg2rad(angle_deg)
+                
+                # XY平面上の軸ベクトル (Zは0に固定)
+                # 12:00 -> [0, 1, 0], 3:00 -> [1, 0, 0], 6:00 -> [0, -1, 0]
+                axis = [float(np.sin(angle_rad_axis)), float(np.cos(angle_rad_axis)), 0.0]
             except:
                 axis = [0.0, 1.0, 0.0]
-                angle_rad = 0
+                angle_rad_axis = 0
 
             # --- 縫い目の初期配置（バックスピン定義） ---
             t_st = np.linspace(0, 2 * np.pi, 200)
@@ -65,13 +53,14 @@ if uploaded_file is not None:
             sy = np.sin(t_st) - alpha * np.sin(3*t_st)
             sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
             
+            # 初期状態で12:00バックスピン（右向きU字）になる配置
             pts = np.vstack([sz, -sx, sy]).T 
             norm = np.linalg.norm(pts, axis=1, keepdims=True)
             pts = pts / norm
             seam_points = pts.tolist()
 
             html_code = f"""
-            <div id="chart" style="width:100%; height:550px;"></div>
+            <div id="chart" style="width:100%; height:600px;"></div>
             <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
             <script>
                 var seam_base = {json.dumps(seam_points)};
@@ -89,22 +78,24 @@ if uploaded_file is not None:
                     ];
                 }}
 
-                var n = 22; var bx = [], by = [], bz = [];
+                var n = 25; var bx = [], by = [], bz = [];
                 for(var i=0; i<=n; i++) {{
                     var v = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                     for(var j=0; j<=n; j++) {{
                         var u = 2 * Math.PI * j / n;
-                        bx[i][j] = Math.cos(u) * Math.sin(v); by[i][j] = Math.sin(u) * Math.sin(v); bz[i][j] = Math.cos(v);
+                        bx[i][j] = Math.cos(u) * Math.sin(v); 
+                        by[i][j] = Math.sin(u) * Math.sin(v); 
+                        bz[i][j] = Math.cos(v);
                     }}
                 }}
 
-                // 画面（XY平面）に並行な黒い棒
+                // XY平面（Z=0）に配置される回転軸（黒い棒）
                 var axis_line = {{
                     type: 'scatter3d', mode: 'lines',
-                    x: [axis[0] * -1.6, axis[0] * 1.6],
-                    y: [axis[1] * -1.6, axis[1] * 1.6],
-                    z: [0, 0], 
-                    line: {{color: '#000000', width: 12}}
+                    x: [axis[0] * -1.7, axis[0] * 1.7],
+                    y: [axis[1] * -1.7, axis[1] * 1.7],
+                    z: [0, 0],
+                    line: {{color: '#000000', width: 15}}
                 }};
 
                 var data = [
@@ -116,18 +107,22 @@ if uploaded_file is not None:
                     }},
                     {{
                         type: 'scatter3d', mode: 'lines', x: [], y: [], z: [],
-                        line: {{color: '#BC1010', width: 30}}
+                        line: {{color: '#BC1010', width: 35}}
                     }},
                     axis_line
                 ];
 
                 var layout = {{
                     scene: {{
-                        xaxis: {{visible: false, range: [-1.6, 1.6]}},
-                        yaxis: {{visible: false, range: [-1.6, 1.6]}},
-                        zaxis: {{visible: false, range: [-1.6, 1.6]}},
+                        xaxis: {{visible: false, range: [-1.7, 1.7]}},
+                        yaxis: {{visible: false, range: [-1.7, 1.7]}},
+                        zaxis: {{visible: false, range: [-1.7, 1.7]}},
                         aspectmode: 'cube',
-                        camera: {{eye: {{x: 0, y: -1.8, z: 0}}}} // 正面視点
+                        camera: {{
+                            eye: {{x: 0, y: 0, z: 2.0}}, // Z軸の正面（画面手前）から見る
+                            up: {{x: 0, y: 1, z: 0}}     // Y軸を上にする
+                        }},
+                        dragmode: false // 視点がズレないように固定
                     }},
                     margin: {{l:0, r:0, b:0, t:0}},
                     showlegend: false
@@ -140,8 +135,9 @@ if uploaded_file is not None:
                     var rx = [], ry = [], rz = [];
                     for(var i=0; i<seam_base.length; i++) {{
                         var p = seam_base[i];
-                        // 軸を画面に並行にするため [0,0,1] で初期傾斜を与える
-                        var r_init = rotate(p, [0,0,1], {angle_rad}); 
+                        // 1. 軸の傾きに合わせて縫い目を配置
+                        var r_init = rotate(p, [0,0,1], {angle_rad_axis}); 
+                        // 2. その軸(axis)周りに回転
                         var r = rotate(r_init, axis, angle);
                         
                         rx.push(r[0]*1.02); ry.push(r[1]*1.02); rz.push(r[2]*1.02);
