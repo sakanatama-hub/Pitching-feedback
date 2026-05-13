@@ -12,7 +12,7 @@ import pickle
 st.set_page_config(layout="wide", page_title="投球解析システム")
 
 # --- 保存用ファイルのパス設定 ---
-# このファイルにデータが蓄積されます
+# ローカル実行環境（PC内）でデータが蓄積されます
 DATA_FILE = "pitch_data_storage.pkl"
 
 # --- 永続化のための関数 ---
@@ -180,7 +180,7 @@ with tab1:
                 avg_dir_str = type_subset[c_dir].iloc[0] 
                 tilt_deg = time_to_degrees(avg_dir_str)
 
-                # 回転方向の判定
+                # 回転方向の判定 (カット・スライダー・カーブ系は逆回転判定)
                 is_reverse = any(keyword in selected_type.lower() for keyword in ["cut", "slider", "sl", "ct", "curve"])
                 spin_multiplier = -1 if is_reverse else 1
                 
@@ -212,6 +212,7 @@ with tab1:
                 tilted_pts = (base_pts @ combined_rot.T)
                 seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
+                # JavaScript部分。Pythonのf-stringの展開を防ぐため {{ }} を使用。
                 html_code = f"""
                 <div id="chart" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -265,7 +266,7 @@ with tab1:
                             var r = rotate(seam_base.seam[i], axis, angle);
                             rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
                             if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                        }
+                        }}
                         Plotly.restyle('chart', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                         requestAnimationFrame(update);
                     }}
