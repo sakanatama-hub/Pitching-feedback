@@ -29,6 +29,7 @@ def save_persistent_data(data):
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = load_persistent_data()
 
+# 投手リスト（ユーザー設定に合わせて調整してください）
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
@@ -37,8 +38,7 @@ PLAYER_HANDS = {
 }
 ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
-# --- カラム名の対応定義 ---
-# トラックマンの名称を内部標準名に変換するマッピング
+# --- カラム名の対応定義 (Trackman & Rapsodo -> Standard) ---
 COLUMN_MAP = {
     'RelSpeed': 'Velocity',
     'SpinRate': 'Spin Rate',
@@ -46,7 +46,11 @@ COLUMN_MAP = {
     'InducedVertBreak': 'VB',
     'HorzBreak': 'HB',
     'SpinEfficiency': 'Spin Efficiency',
-    'TaggedPitchType': 'Pitch Type'
+    'TaggedPitchType': 'Pitch Type',
+    'True Spin (release)': 'Spin Rate',
+    'Spin Efficiency (release)': 'Spin Efficiency',
+    'VB (trajectory)': 'VB',
+    'HB (trajectory)': 'HB'
 }
 
 def time_to_degrees(time_str):
@@ -62,7 +66,7 @@ def time_to_degrees(time_str):
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
 # ==========================================
-# タブ2：データ登録 (マルチ形式対応)
+# タブ2：データ登録 (エラー対策強化版)
 # ==========================================
 with tab2:
     st.header("データ登録 (Rapsodo / Trackman)")
@@ -76,49 +80,55 @@ with tab2:
     if uploaded_file is not None:
         if st.button("データを登録・蓄積する"):
             try:
-                # 1. 読み込み (ヘッダー位置の自動調整)
+                # 1. 読み込みロジック (ヘッダー位置を自動探索)
                 if uploaded_file.name.endswith('.csv'):
-                    # トラックマンは1行目から、ラプソードは5行目からの場合が多い
-                    test_df = pd.read_csv(uploaded_file, nrows=5)
-                    skip = 4 if 'PitchNo' in test_df.columns or 'Rapsodo' in str(test_df.columns) else 0
+                    # まず数行読み込んで、どちらの形式か判定
+                    # ラプソードは冒頭にメタデータがあるため "PitchNo" が最初に来ない
+                    temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
+                    
+                    # キーワードを探してスキップ行数を決める
+                    skip = 0
+                    for i, row in temp_df.iterrows():
+                        row_str = row.astype(str).values
+                        if any("PitchNo" in s or "Pitcher" in s for s in row_str):
+                            skip = i
+                            break
+                    
+                    uploaded_file.seek(0) # 読み込み位置をリセット
                     new_df = pd.read_csv(uploaded_file, skiprows=skip)
                 else:
                     new_df = pd.read_excel(uploaded_file)
 
-                # 2. カラム名の統一化 (Trackman -> Standard)
-                new_df = new_df.rename(columns=COLUMN_MAP)
-                
-                # ラプソード特有の名称も変換
-                rapsodo_map = {
-                    'True Spin (release)': 'Spin Rate',
-                    'Spin Efficiency (release)': 'Spin Efficiency',
-                    'VB (trajectory)': 'VB',
-                    'HB (trajectory)': 'HB'
-                }
-                new_df = new_df.rename(columns=rapsodo_map)
-
-                # 3. 数値クレンジング
-                for c in ['Spin Rate', 'Spin Efficiency', 'VB', 'HB']:
-                    if c in new_df.columns:
-                        new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
-
-                # 4. 蓄積
-                if target_player not in st.session_state['stored_data']:
-                    st.session_state['stored_data'][target_player] = {}
-                
-                date_key = str(target_date)
-                if date_key in st.session_state['stored_data'][target_player]:
-                    existing_df = st.session_state['stored_data'][target_player][date_key]
-                    combined_df = pd.concat([existing_df, new_df], ignore_index=True).drop_duplicates()
-                    st.session_state['stored_data'][target_player][date_key] = combined_df
+                if new_df.empty:
+                    st.error("ファイルからデータが読み込めませんでした。形式を確認してください。")
                 else:
-                    st.session_state['stored_data'][target_player][date_key] = new_df
-                
-                save_persistent_data(st.session_state['stored_data'])
-                st.success(f"{target_player} のデータを蓄積しました！")
-                st.balloons()
+                    # 2. カラム名の統一
+                    new_df = new_df.rename(columns=COLUMN_MAP)
+
+                    # 3. 数値化 (単位や記号の除去)
+                    cols_to_clean = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
+                    for c in cols_to_clean:
+                        if c in new_df.columns:
+                            new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', '').replace('nan', np.nan), errors='coerce')
+
+                    # 4. 蓄積処理
+                    if target_player not in st.session_state['stored_data']:
+                        st.session_state['stored_data'][target_player] = {}
+                    
+                    date_key = str(target_date)
+                    if date_key in st.session_state['stored_data'][target_player]:
+                        existing_df = st.session_state['stored_data'][target_player][date_key]
+                        combined_df = pd.concat([existing_df, new_df], ignore_index=True).drop_duplicates()
+                        st.session_state['stored_data'][target_player][date_key] = combined_df
+                    else:
+                        st.session_state['stored_data'][target_player][date_key] = new_df
+                    
+                    save_persistent_data(st.session_state['stored_data'])
+                    st.success(f"✅ {target_player} のデータを蓄積しました！ ({len(new_df)}投分)")
+                    st.balloons()
+
             except Exception as e:
-                st.error(f"エラー: {e}")
+                st.error(f"読み込みエラー: {e}")
 
 # ==========================================
 # タブ1：分析フィードバック
@@ -127,33 +137,35 @@ with tab1:
     st.header("投球解析フィードバック")
     
     if not st.session_state['stored_data']:
-        st.info("「データ登録」からファイルをアップロードしてください。")
+        st.info("「データ登録」タブからファイルをアップロードしてください。")
     else:
         sel_col1, sel_col2 = st.columns(2)
         with sel_col1:
-            display_player = st.selectbox("選手", sorted(st.session_state['stored_data'].keys()))
+            display_player = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
         with sel_col2:
-            display_date = st.selectbox("日付", sorted(st.session_state['stored_data'][display_player].keys(), reverse=True))
+            display_date = st.selectbox("日付を選択", sorted(st.session_state['stored_data'][display_player].keys(), reverse=True))
         
         df = st.session_state['stored_data'][display_player][display_date].copy()
         hand = PLAYER_HANDS.get(display_player, "右")
 
-        # 内部標準名を使用
+        # カラム名の定義（内部標準名）
         c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
         if 'Pitch Type' in df.columns:
-            st.subheader("📊 球種別平均")
-            stats = df.groupby('Pitch Type')[[c_rev, c_eff, c_vb, c_hb]].mean()
-            st.dataframe(stats.style.format(precision=1), use_container_width=True)
+            st.subheader("📊 球種別データサマリー")
+            display_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
+            stats_group = df.groupby('Pitch Type')[display_cols].mean()
+            st.dataframe(stats_group.style.format(precision=1), use_container_width=True)
 
         if c_vb in df.columns and c_hb in df.columns:
             st.divider()
             st.subheader("📈 変化量マップ")
+            # インチ単位への変換（もしトラックマンデータがフィート等の場合を考慮。基本はそのまま表示）
             fig_map = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type',
-                                 range_x=[-25, 25], range_y=[-25, 25])
-            fig_map.add_hline(y=0, line_dash="dash")
-            fig_map.add_vline(x=0, line_dash="dash")
-            fig_map.update_layout(plot_bgcolor='white', height=600)
+                                 hover_data=['Velocity'] if 'Velocity' in df.columns else None)
+            fig_map.add_hline(y=0, line_dash="dash", line_color="gray")
+            fig_map.add_vline(x=0, line_dash="dash", line_color="gray")
+            fig_map.update_layout(plot_bgcolor='white', height=600, xaxis_title="横の変化量 (HB)", yaxis_title="縦の変化量 (VB)")
             st.plotly_chart(fig_map, use_container_width=True)
 
         if c_dir in df.columns and c_rev in df.columns:
@@ -161,7 +173,7 @@ with tab1:
             st.subheader("⚾️ スピンビジュアライザー")
             valid_data = df.dropna(subset=[c_dir, c_rev])
             if not valid_data.empty:
-                selected_type = st.selectbox("球種選択:", sorted(valid_data['Pitch Type'].unique()))
+                selected_type = st.selectbox("球種を選択:", sorted(valid_data['Pitch Type'].unique()))
                 type_subset = valid_data[valid_data['Pitch Type'] == selected_type]
                 
                 avg_rpm = type_subset[c_rev].mean()
@@ -171,8 +183,8 @@ with tab1:
 
                 is_reverse = any(kw in selected_type.lower() for kw in ["cut", "slider", "sl", "curve"])
                 spin_multiplier = -1 if is_reverse else 1
-
-                # --- 3D描画 (JSの{{ }}対応済み) ---
+                
+                # 3D描画ロジック (JSのカッコ対応)
                 t_st = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx, sy, sz = np.cos(t_st) + alpha * np.cos(3*t_st), np.sin(t_st) - alpha * np.sin(3*t_st), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t_st)
