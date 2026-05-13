@@ -30,7 +30,6 @@ def save_persistent_data(data):
     except Exception as e:
         st.error(f"データの保存に失敗しました: {e}")
 
-# セッション状態の初期化
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = load_persistent_data()
 
@@ -43,7 +42,7 @@ PLAYER_HANDS = {
 }
 ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
-# カラム名の対応マッピング
+# カラム名マッピング
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type',
     'RelSpeed': 'Velocity',
@@ -85,7 +84,6 @@ with tab2:
     if uploaded_file is not None:
         if st.button("データを登録・蓄積する"):
             try:
-                # ヘッダー位置の自動探索
                 temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
                 skip = 0
                 for i, row in temp_df.iterrows():
@@ -96,14 +94,12 @@ with tab2:
                 uploaded_file.seek(0)
                 new_df = pd.read_csv(uploaded_file, skiprows=skip)
 
-                # カラム名変換とクレンジング
                 new_df = new_df.rename(columns=COLUMN_MAP)
                 cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                 for c in cols_to_num:
                     if c in new_df.columns:
                         new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-                # 蓄積
                 if target_player not in st.session_state['stored_data']:
                     st.session_state['stored_data'][target_player] = {}
                 
@@ -140,27 +136,44 @@ with tab1:
         c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
         if 'Pitch Type' in df.columns:
-            # サマリー表示
             st.subheader("📊 平均データ")
             stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
             st.dataframe(df.groupby('Pitch Type')[stats_cols].mean().style.format(precision=1), use_container_width=True)
 
-            # 変化量マップ
+            # --- 変化量マップ (正方形・範囲指定版) ---
             st.divider()
             st.subheader("📈 変化量マップ")
-            fig = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-25, 25], range_y=[-25, 25])
-            fig.add_hline(y=0, line_dash="dash")
-            fig.add_vline(x=0, line_dash="dash")
-            st.plotly_chart(fig, use_container_width=True)
+            
+            # グラフの作成
+            fig = px.scatter(
+                df, x=c_hb, y=c_vb, color='Pitch Type',
+                hover_data=['Velocity'] if 'Velocity' in df.columns else None,
+                # 軸の範囲を -60 から 60 に設定
+                range_x=[-60, 60], range_y=[-60, 60]
+            )
 
-            # 3Dスピンビジュアライザー (ロジック完全版)
+            # ゼロ線の追加
+            fig.add_hline(y=0, line_dash="dash", line_color="black", line_width=1)
+            fig.add_vline(x=0, line_dash="dash", line_color="black", line_width=1)
+
+            # 正方形（アスペクト比 1:1）に固定し、グリッドを見やすく設定
+            fig.update_layout(
+                plot_bgcolor='white',
+                width=700, height=700, # 描画エリア自体を正方形に近づける
+                yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
+                xaxis=dict(gridcolor='lightgray'),
+                xaxis_title="Horizontal Break (HB)",
+                yaxis_title="Vertical Break (VB)"
+            )
+            
+            st.plotly_chart(fig, use_container_width=False) # container無視で指定サイズ優先
+
+            # --- 3Dスピンビジュアライザー ---
             st.divider()
             st.subheader("⚾️ 3Dスピンビジュアライザー")
-            
-            # 有効データの抽出
             valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
             if not valid_df.empty:
-                sel_type = st.selectbox("確認する球種を選択:", sorted(valid_df['Pitch Type'].unique()))
+                sel_type = st.selectbox("確認する球種を選択:", sorted(valid_df['Pitch Type'].dropna().unique()))
                 subset = valid_df[valid_df['Pitch Type'] == sel_type]
                 
                 avg_rpm = subset[c_rev].mean()
@@ -170,22 +183,16 @@ with tab1:
                 
                 st.write(f"平均回転数: {avg_rpm:.0f} RPM | 効率: {avg_eff:.1f}% | Tilt: {avg_tilt}")
 
-                # --- 縫い目データの生成 ---
                 t = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
-                sx = np.cos(t) + alpha * np.cos(3*t)
-                sy = np.sin(t) - alpha * np.sin(3*t)
-                sz = 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+                sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
                 base_pts = np.vstack([sz, sx, sy]).T 
 
-                # 回転行列計算
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
-
                 gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
-                # 利き手によるジャイロ方向の補正
                 g_sign = 1 if hand == "右" else -1
                 rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
 
@@ -193,12 +200,8 @@ with tab1:
                 axis = combined_rot @ np.array([1.0, 0.0, 0.0])
                 tilted_pts = (base_pts @ combined_rot.T)
                 seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
+                multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
-                # スピン方向の判定
-                is_rev = any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"])
-                multiplier = -1 if is_rev else 1
-
-                # JavaScriptによる描画
                 html_code = f"""
                 <div id="canvas_3d" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -208,7 +211,6 @@ with tab1:
                     var rpm = {avg_rpm};
                     var mult = {multiplier};
                     var cur_angle = 0;
-
                     function rot_p(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
                         return [
@@ -217,32 +219,24 @@ with tab1:
                             p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
                         ];
                     }}
-
                     var bx = [], by = [], bz = [], n = 22;
                     for(var i=0; i<=n; i++) {{
                         var phi = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                         for(var j=0; j<=n; j++) {{
                             var theta = 2 * Math.PI * j / n;
-                            bx[i][j] = Math.cos(theta) * Math.sin(phi);
-                            by[i][j] = Math.sin(theta) * Math.sin(phi);
-                            bz[i][j] = Math.cos(phi);
+                            bx[i][j] = Math.cos(theta) * Math.sin(phi); by[i][j] = Math.sin(theta) * Math.sin(phi); bz[i][j] = Math.cos(phi);
                         }}
                     }}
-
                     var data = [
                         {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#eee'],['1','#eee']], showscale: false, opacity: 0.7 }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 25}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 10}} }}
                     ];
-
                     var layout = {{
-                        scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
-                                  aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
+                        scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
                         margin: {{l:0, r:0, b:0, t:0}}
                     }};
-
                     Plotly.newPlot('canvas_3d', data, layout);
-
                     function animate() {{
                         cur_angle += mult * (rpm / 60) * (2 * Math.PI) / 1000;
                         var rx = [], ry = [], rz = [];
@@ -258,5 +252,3 @@ with tab1:
                 </script>
                 """
                 st.components.v1.html(html_code, height=600)
-            else:
-                st.warning("選択された日付にスピン解析に必要なデータが含まれていません。")
