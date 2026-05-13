@@ -3,16 +3,15 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import date
 import re
 import os
 import pickle
 
-# --- ページ設定 ---
-st.set_page_config(layout="wide", page_title="投球解析システム (Rapsodo/Trackman対応)")
+# --- 1. ページ設定 ---
+st.set_page_config(layout="wide", page_title="投球解析システム (統合版)")
 
-# --- データの永続化設定 ---
+# --- 2. データの永続化設定 ---
 DATA_FILE = "pitch_data_storage.pkl"
 
 def load_persistent_data():
@@ -34,16 +33,26 @@ def save_persistent_data(data):
 if 'stored_data' not in st.session_state:
     st.session_state['stored_data'] = load_persistent_data()
 
-# 投手リスト
+# --- 3. 選手・カラー設定 ---
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
     "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", 
     "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
 }
-ALL_PLAYER_NAMES = list(PLAYER_HANDS.keys())
 
-# カラム名マッピング
+# 球種ごとの指定色
+COLOR_MAP_PITCH = {
+    "Straight": "red", "Fastball": "red", "ストレート": "red", "四縫線": "red", "4-Seam": "red",
+    "Split": "blue", "Splitter": "blue", "スプリット": "blue",
+    "Changeup": "green", "CH": "green", "チェンジアップ": "green",
+    "Cutter": "orange", "Cut": "orange", "カット": "orange",
+    "Slider": "yellow", "SL": "yellow", "スライダー": "yellow",
+    "Curve": "darkblue", "Curveball": "darkblue", "CU": "darkblue", "カーブ": "darkblue",
+    "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
+}
+
+# --- 4. カラム名マッピング ---
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type',
     'RelSpeed': 'Velocity',
@@ -74,10 +83,10 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"
 # タブ2：データ登録
 # ==========================================
 with tab2:
-    st.header("データ登録 (Rapsodo / Trackman)")
+    st.header("データ登録 (Rapsodo / Trackman対応)")
     col_reg1, col_reg2 = st.columns(2)
     with col_reg1:
-        target_player = st.selectbox("選手を選択", ALL_PLAYER_NAMES, key="reg_p")
+        target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
         target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
     
     uploaded_file = st.file_uploader("CSVファイルをアップロード", type=['csv'])
@@ -85,6 +94,7 @@ with tab2:
     if uploaded_file is not None:
         if st.button("データを登録・蓄積する"):
             try:
+                # ヘッダー位置を自動探索
                 temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
                 skip = 0
                 for i, row in temp_df.iterrows():
@@ -95,12 +105,16 @@ with tab2:
                 uploaded_file.seek(0)
                 new_df = pd.read_csv(uploaded_file, skiprows=skip)
 
+                # カラム変換
                 new_df = new_df.rename(columns=COLUMN_MAP)
+                
+                # 数値クレンジング
                 cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                 for c in cols_to_num:
                     if c in new_df.columns:
                         new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
+                # 蓄積
                 if target_player not in st.session_state['stored_data']:
                     st.session_state['stored_data'][target_player] = {}
                 
@@ -112,6 +126,7 @@ with tab2:
                 st.session_state['stored_data'][target_player][date_key] = new_df
                 save_persistent_data(st.session_state['stored_data'])
                 st.success(f"{target_player} のデータを保存しました。")
+                st.balloons()
             except Exception as e:
                 st.error(f"読み込みエラー: {e}")
 
@@ -122,29 +137,30 @@ with tab1:
     st.header("投球解析フィードバック")
     
     if not st.session_state['stored_data']:
-        st.info("データが登録されていません。")
+        st.info("データが登録されていません。「データ登録」タブからアップロードしてください。")
     else:
-        c1, c2 = st.columns(2)
-        with c1:
-            p_name = st.selectbox("選手", sorted(st.session_state['stored_data'].keys()))
-        with c2:
-            p_date = st.selectbox("日付", sorted(st.session_state['stored_data'][p_name].keys(), reverse=True))
+        sel_c1, sel_c2 = st.columns(2)
+        with sel_c1:
+            p_name = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
+        with sel_c2:
+            p_date = st.selectbox("日付を選択", sorted(st.session_state['stored_data'][p_name].keys(), reverse=True))
         
         df = st.session_state['stored_data'][p_name][p_date].copy()
         hand = PLAYER_HANDS.get(p_name, "右")
 
+        # 内部変数定義
         c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
         if 'Pitch Type' in df.columns:
-            st.subheader("📊 平均データ")
+            # 1. データテーブル
+            st.subheader("📊 平均データサマリー")
             stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
             stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
             st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-            # --- 変化量マップ (横並び表示) ---
+            # 2. 変化量マップ (横並び)
             st.divider()
-            st.subheader("📈 変化量マップ (-60 to 60)")
-            
+            st.subheader("📈 変化量マップ (全投球 vs 球種別平均)")
             plot_col1, plot_col2 = st.columns(2)
 
             with plot_col1:
@@ -152,7 +168,7 @@ with tab1:
                 fig_all = px.scatter(
                     df, x=c_hb, y=c_vb, color='Pitch Type',
                     range_x=[-60, 60], range_y=[-60, 60],
-                    title="All Pitches"
+                    color_discrete_map=COLOR_MAP_PITCH
                 )
                 fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                 fig_all.add_vline(x=0, line_dash="dash", line_color="black")
@@ -165,12 +181,10 @@ with tab1:
 
             with plot_col2:
                 st.write("▼ 球種別平均プロット")
-                # 平均値のみをプロット（点を少し大きく、テキストラベル付き）
                 fig_avg = px.scatter(
                     stats_df, x=c_hb, y=c_vb, color='Pitch Type',
-                    text='Pitch Type',
-                    range_x=[-60, 60], range_y=[-60, 60],
-                    title="Average per Pitch Type"
+                    text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
+                    color_discrete_map=COLOR_MAP_PITCH
                 )
                 fig_avg.update_traces(marker=dict(size=15), textposition='top center')
                 fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
@@ -182,39 +196,48 @@ with tab1:
                 )
                 st.plotly_chart(fig_avg, use_container_width=False)
 
-            # --- 3Dスピンビジュアライザー ---
+            # 3. 3Dスピンビジュアライザー
             st.divider()
             st.subheader("⚾️ 3Dスピンビジュアライザー")
             valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
             if not valid_df.empty:
-                sel_type = st.selectbox("球種を選択:", sorted(valid_df['Pitch Type'].dropna().unique()))
+                # 安全にユニークな球種を取得
+                available_types = sorted(valid_df['Pitch Type'].dropna().unique())
+                sel_type = st.selectbox("球種を選択して回転を確認:", available_types)
+                
                 subset = valid_df[valid_df['Pitch Type'] == sel_type]
                 avg_rpm = subset[c_rev].mean()
                 avg_eff = subset[c_eff].mean() if c_eff in subset.columns else 100.0
-                avg_tilt = str(subset[c_dir].iloc[0])
-                tilt_deg = time_to_degrees(avg_tilt)
+                avg_tilt_str = str(subset[c_dir].iloc[0])
+                tilt_deg = time_to_degrees(avg_tilt_str)
                 
-                st.write(f"平均回転数: {avg_rpm:.0f} RPM | 効率: {avg_eff:.1f}% | Tilt: {avg_tilt}")
+                st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
+                # --- 3D描画用計算 ---
                 t = np.linspace(0, 2 * np.pi, 200)
                 alpha = 0.4
                 sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
                 base_pts = np.vstack([sz, sx, sy]).T 
+
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
+
                 gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                 g_sign = 1 if hand == "右" else -1
                 rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
+
                 combined_rot = rot_gyro @ rot_z
                 axis = combined_rot @ np.array([1.0, 0.0, 0.0])
                 tilted_pts = (base_pts @ combined_rot.T)
                 seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
+
                 multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
+                # JavaScript (Plotly.js)
                 html_code = f"""
-                <div id="canvas_3d" style="width:100%; height:600px;"></div>
+                <div id="ball_canvas" style="width:100%; height:600px;"></div>
                 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
                 <script>
                     var points = {{ seam: {json.dumps(seam_points)} }};
@@ -222,7 +245,8 @@ with tab1:
                     var rpm = {avg_rpm};
                     var mult = {multiplier};
                     var cur_angle = 0;
-                    function rot_p(p, ax, a) {{
+
+                    function rotatePoint(p, ax, a) {{
                         var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
                         return [
                             p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
@@ -230,33 +254,41 @@ with tab1:
                             p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
                         ];
                     }}
+
                     var bx = [], by = [], bz = [], n = 22;
                     for(var i=0; i<=n; i++) {{
                         var phi = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
                         for(var j=0; j<=n; j++) {{
                             var theta = 2 * Math.PI * j / n;
-                            bx[i][j] = Math.cos(theta) * Math.sin(phi); by[i][j] = Math.sin(theta) * Math.sin(phi); bz[i][j] = Math.cos(phi);
+                            bx[i][j] = Math.cos(theta) * Math.sin(phi);
+                            by[i][j] = Math.sin(theta) * Math.sin(phi);
+                            bz[i][j] = Math.cos(phi);
                         }}
                     }}
+
                     var data = [
                         {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#eee'],['1','#eee']], showscale: false, opacity: 0.7 }},
                         {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 25}} }},
                         {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 10}} }}
                     ];
+
                     var layout = {{
-                        scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
+                        scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
+                                  aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
                         margin: {{l:0, r:0, b:0, t:0}}
                     }};
-                    Plotly.newPlot('canvas_3d', data, layout);
+
+                    Plotly.newPlot('ball_canvas', data, layout);
+
                     function animate() {{
                         cur_angle += mult * (rpm / 60) * (2 * Math.PI) / 1000;
                         var rx = [], ry = [], rz = [];
                         for(var i=0; i<points.seam.length; i++) {{
-                            var r = rot_p(points.seam[i], axis, cur_angle);
+                            var r = rotatePoint(points.seam[i], axis, cur_angle);
                             rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
                             if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
                         }}
-                        Plotly.restyle('canvas_3d', {{x: [rx], y: [ry], z: [rz]}}, [1]);
+                        Plotly.restyle('ball_canvas', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                         requestAnimationFrame(animate);
                     }}
                     animate();
