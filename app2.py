@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import date
 import re
 import os
@@ -111,7 +112,6 @@ with tab2:
                 st.session_state['stored_data'][target_player][date_key] = new_df
                 save_persistent_data(st.session_state['stored_data'])
                 st.success(f"{target_player} のデータを保存しました。")
-                st.balloons()
             except Exception as e:
                 st.error(f"読み込みエラー: {e}")
 
@@ -138,44 +138,57 @@ with tab1:
         if 'Pitch Type' in df.columns:
             st.subheader("📊 平均データ")
             stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
-            st.dataframe(df.groupby('Pitch Type')[stats_cols].mean().style.format(precision=1), use_container_width=True)
+            stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
+            st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-            # --- 変化量マップ (正方形・範囲指定版) ---
+            # --- 変化量マップ (横並び表示) ---
             st.divider()
-            st.subheader("📈 変化量マップ")
+            st.subheader("📈 変化量マップ (-60 to 60)")
             
-            # グラフの作成
-            fig = px.scatter(
-                df, x=c_hb, y=c_vb, color='Pitch Type',
-                hover_data=['Velocity'] if 'Velocity' in df.columns else None,
-                # 軸の範囲を -60 から 60 に設定
-                range_x=[-60, 60], range_y=[-60, 60]
-            )
+            plot_col1, plot_col2 = st.columns(2)
 
-            # ゼロ線の追加
-            fig.add_hline(y=0, line_dash="dash", line_color="black", line_width=1)
-            fig.add_vline(x=0, line_dash="dash", line_color="black", line_width=1)
+            with plot_col1:
+                st.write("▼ 全投球プロット")
+                fig_all = px.scatter(
+                    df, x=c_hb, y=c_vb, color='Pitch Type',
+                    range_x=[-60, 60], range_y=[-60, 60],
+                    title="All Pitches"
+                )
+                fig_all.add_hline(y=0, line_dash="dash", line_color="black")
+                fig_all.add_vline(x=0, line_dash="dash", line_color="black")
+                fig_all.update_layout(
+                    plot_bgcolor='white', width=550, height=550,
+                    yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
+                    xaxis=dict(gridcolor='lightgray')
+                )
+                st.plotly_chart(fig_all, use_container_width=False)
 
-            # 正方形（アスペクト比 1:1）に固定し、グリッドを見やすく設定
-            fig.update_layout(
-                plot_bgcolor='white',
-                width=700, height=700, # 描画エリア自体を正方形に近づける
-                yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
-                xaxis=dict(gridcolor='lightgray'),
-                xaxis_title="Horizontal Break (HB)",
-                yaxis_title="Vertical Break (VB)"
-            )
-            
-            st.plotly_chart(fig, use_container_width=False) # container無視で指定サイズ優先
+            with plot_col2:
+                st.write("▼ 球種別平均プロット")
+                # 平均値のみをプロット（点を少し大きく、テキストラベル付き）
+                fig_avg = px.scatter(
+                    stats_df, x=c_hb, y=c_vb, color='Pitch Type',
+                    text='Pitch Type',
+                    range_x=[-60, 60], range_y=[-60, 60],
+                    title="Average per Pitch Type"
+                )
+                fig_avg.update_traces(marker=dict(size=15), textposition='top center')
+                fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
+                fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
+                fig_avg.update_layout(
+                    plot_bgcolor='white', width=550, height=550,
+                    yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
+                    xaxis=dict(gridcolor='lightgray')
+                )
+                st.plotly_chart(fig_avg, use_container_width=False)
 
             # --- 3Dスピンビジュアライザー ---
             st.divider()
             st.subheader("⚾️ 3Dスピンビジュアライザー")
             valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
             if not valid_df.empty:
-                sel_type = st.selectbox("確認する球種を選択:", sorted(valid_df['Pitch Type'].dropna().unique()))
+                sel_type = st.selectbox("球種を選択:", sorted(valid_df['Pitch Type'].dropna().unique()))
                 subset = valid_df[valid_df['Pitch Type'] == sel_type]
-                
                 avg_rpm = subset[c_rev].mean()
                 avg_eff = subset[c_eff].mean() if c_eff in subset.columns else 100.0
                 avg_tilt = str(subset[c_dir].iloc[0])
@@ -187,7 +200,6 @@ with tab1:
                 alpha = 0.4
                 sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
                 base_pts = np.vstack([sz, sx, sy]).T 
-
                 tilt_rad = np.deg2rad(tilt_deg)
                 cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                 rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
@@ -195,7 +207,6 @@ with tab1:
                 cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                 g_sign = 1 if hand == "右" else -1
                 rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
-
                 combined_rot = rot_gyro @ rot_z
                 axis = combined_rot @ np.array([1.0, 0.0, 0.0])
                 tilted_pts = (base_pts @ combined_rot.T)
