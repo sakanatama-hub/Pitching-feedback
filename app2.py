@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
-from datetime import date
+from datetime import date, timedelta
 import re
 import os
 import pickle
@@ -89,21 +89,36 @@ with tab2:
         target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
         target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
     
-    uploaded_file = st.file_uploader("CSVファイルをアップロード", type=['csv'])
+    # CSVに加えてExcel形式 (.xlsx, .xls) も受け付けるように変更
+    uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
 
     if uploaded_file is not None:
         if st.button("データを登録・蓄積する"):
             try:
-                # ヘッダー位置を自動探索
-                temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
-                skip = 0
-                for i, row in temp_df.iterrows():
-                    row_str = row.astype(str).values
-                    if any(k in s for s in row_str for k in ["PitchNo", "Pitcher", "TaggedPitchType"]):
-                        skip = i
-                        break
-                uploaded_file.seek(0)
-                new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
+                
+                # 拡張子によって読み込み方法を分岐
+                if file_ext == '.csv':
+                    # ヘッダー位置を自動探索 (CSV用)
+                    temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
+                    skip = 0
+                    for i, row in temp_df.iterrows():
+                        row_str = row.astype(str).values
+                        if any(k in s for s in row_str for k in ["PitchNo", "Pitcher", "TaggedPitchType"]):
+                            skip = i
+                            break
+                    uploaded_file.seek(0)
+                    new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                else:
+                    # Excel用 (ヘッダー自動探索)
+                    temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
+                    skip = 0
+                    for i, row in temp_df.iterrows():
+                        row_str = row.astype(str).values
+                        if any(k in s for s in row_str for k in ["PitchNo", "Pitcher", "TaggedPitchType"]):
+                            skip = i
+                            break
+                    new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
                 # カラム変換
                 new_df = new_df.rename(columns=COLUMN_MAP)
@@ -142,156 +157,188 @@ with tab1:
         sel_c1, sel_c2 = st.columns(2)
         with sel_c1:
             p_name = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
-        with sel_c2:
-            p_date = st.selectbox("日付を選択", sorted(st.session_state['stored_data'][p_name].keys(), reverse=True))
         
-        df = st.session_state['stored_data'][p_name][p_date].copy()
-        hand = PLAYER_HANDS.get(p_name, "右")
+        # 該当選手の登録がある最古の日付と最新の日付を取得
+        available_dates = sorted(st.session_state['stored_data'][p_name].keys())
+        min_date = date.fromisoformat(available_dates[0]) if available_dates else date.today()
+        max_date = date.fromisoformat(available_dates[-1]) if available_dates else date.today()
+        
+        with sel_c2:
+            # 日付の「範囲」を選択できるように変更
+            date_range = st.date_input(
+                "分析対象の期間を選択",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date
+            )
+        
+        # 期間選択が正しく（開始日と終了日の両方）行われているかチェック
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start_date, end_date = date_range
+            
+            # 指定された期間内のデータを結合
+            matched_dfs = []
+            for d_str, d_df in st.session_state['stored_data'][p_name].items():
+                cur_d = date.fromisoformat(d_str)
+                if start_date <= cur_d <= end_date:
+                    matched_dfs.append(d_df)
+            
+            if not matched_dfs:
+                st.warning("選択された期間内にデータが存在しません。")
+                df = pd.DataFrame()
+            else:
+                df = pd.concat(matched_dfs, ignore_index=True).copy()
+        else:
+            # 選択中の段階（片方しか選ばれていないなど）は空のDataFrameにしておく
+            df = pd.DataFrame()
 
-        # 内部変数定義
-        c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
+        if not df.empty:
+            hand = PLAYER_HANDS.get(p_name, "右")
 
-        if 'Pitch Type' in df.columns:
-            # 1. データテーブル
-            st.subheader("📊 平均データサマリー")
-            stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
-            stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
-            st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+            # 内部変数定義
+            c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
-            # 2. 変化量マップ (横並び)
-            st.divider()
-            st.subheader("📈 変化量マップ (全投球 vs 球種別平均)")
-            plot_col1, plot_col2 = st.columns(2)
+            if 'Pitch Type' in df.columns:
+                # 1. データテーブル
+                st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date})")
+                stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
+                stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
+                st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-            with plot_col1:
-                st.write("▼ 全投球プロット")
-                fig_all = px.scatter(
-                    df, x=c_hb, y=c_vb, color='Pitch Type',
-                    range_x=[-60, 60], range_y=[-60, 60],
-                    color_discrete_map=COLOR_MAP_PITCH
-                )
-                fig_all.add_hline(y=0, line_dash="dash", line_color="black")
-                fig_all.add_vline(x=0, line_dash="dash", line_color="black")
-                fig_all.update_layout(
-                    plot_bgcolor='white', width=550, height=550,
-                    yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
-                    xaxis=dict(gridcolor='lightgray')
-                )
-                st.plotly_chart(fig_all, use_container_width=False)
+                # 2. 変化量マップ (横並び)
+                st.divider()
+                st.subheader("📈 変化量マップ (全投球 vs 球種別平均)")
+                plot_col1, plot_col2 = st.columns(2)
 
-            with plot_col2:
-                st.write("▼ 球種別平均プロット")
-                fig_avg = px.scatter(
-                    stats_df, x=c_hb, y=c_vb, color='Pitch Type',
-                    text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
-                    color_discrete_map=COLOR_MAP_PITCH
-                )
-                fig_avg.update_traces(marker=dict(size=15), textposition='top center')
-                fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
-                fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
-                fig_avg.update_layout(
-                    plot_bgcolor='white', width=550, height=550,
-                    yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
-                    xaxis=dict(gridcolor='lightgray')
-                )
-                st.plotly_chart(fig_avg, use_container_width=False)
+                with plot_col1:
+                    st.write("▼ 全投球プロット")
+                    fig_all = px.scatter(
+                        df, x=c_hb, y=c_vb, color='Pitch Type',
+                        range_x=[-60, 60], range_y=[-60, 60],
+                        color_discrete_map=COLOR_MAP_PITCH
+                    )
+                    fig_all.add_hline(y=0, line_dash="dash", line_color="black")
+                    fig_all.add_vline(x=0, line_dash="dash", line_color="black")
+                    fig_all.update_layout(
+                        plot_bgcolor='white', width=550, height=550,
+                        yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
+                        xaxis=dict(gridcolor='lightgray')
+                    )
+                    st.plotly_chart(fig_all, use_container_width=False)
 
-            # 3. 3Dスピンビジュアライザー
-            st.divider()
-            st.subheader("⚾️ 3Dスピンビジュアライザー")
-            valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
-            if not valid_df.empty:
-                # 安全にユニークな球種を取得
-                available_types = sorted(valid_df['Pitch Type'].dropna().unique())
-                sel_type = st.selectbox("球種を選択して回転を確認:", available_types)
-                
-                subset = valid_df[valid_df['Pitch Type'] == sel_type]
-                avg_rpm = subset[c_rev].mean()
-                avg_eff = subset[c_eff].mean() if c_eff in subset.columns else 100.0
-                avg_tilt_str = str(subset[c_dir].iloc[0])
-                tilt_deg = time_to_degrees(avg_tilt_str)
-                
-                st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
+                with plot_col2:
+                    st.write("▼ 球種別平均プロット")
+                    fig_avg = px.scatter(
+                        stats_df, x=c_hb, y=c_vb, color='Pitch Type',
+                        text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
+                        color_discrete_map=COLOR_MAP_PITCH
+                    )
+                    fig_avg.update_traces(marker=dict(size=15), textposition='top center')
+                    fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
+                    fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
+                    fig_avg.update_layout(
+                        plot_bgcolor='white', width=550, height=550,
+                        yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
+                        xaxis=dict(gridcolor='lightgray')
+                    )
+                    st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 3D描画用計算 ---
-                t = np.linspace(0, 2 * np.pi, 200)
-                alpha = 0.4
-                sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-                base_pts = np.vstack([sz, sx, sy]).T 
+                # 3. 3Dスピンビジュアライザー
+                st.divider()
+                st.subheader("⚾️ 3Dスピンビジュアライザー")
+                valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
+                if not valid_df.empty:
+                    # 安全にユニークな球種を取得
+                    available_types = sorted(valid_df['Pitch Type'].dropna().unique())
+                    sel_type = st.selectbox("球種を選択して回転を確認:", available_types)
+                    
+                    subset = valid_df[valid_df['Pitch Type'] == sel_type]
+                    avg_rpm = subset[c_rev].mean()
+                    avg_eff = subset[c_eff].mean() if c_eff in subset.columns else 100.0
+                    avg_tilt_str = str(subset[c_dir].iloc[0])
+                    tilt_deg = time_to_degrees(avg_tilt_str)
+                    
+                    st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
-                tilt_rad = np.deg2rad(tilt_deg)
-                cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
-                rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
+                    # --- 3D描画用計算 ---
+                    t = np.linspace(0, 2 * np.pi, 200)
+                    alpha = 0.4
+                    sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+                    base_pts = np.vstack([sz, sx, sy]).T 
 
-                gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-                cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
-                g_sign = 1 if hand == "右" else -1
-                rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
+                    tilt_rad = np.deg2rad(tilt_deg)
+                    cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
+                    rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
-                combined_rot = rot_gyro @ rot_z
-                axis = combined_rot @ np.array([1.0, 0.0, 0.0])
-                tilted_pts = (base_pts @ combined_rot.T)
-                seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
+                    gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
+                    cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
+                    g_sign = 1 if hand == "右" else -1
+                    rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
 
-                multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
+                    combined_rot = rot_gyro @ rot_z
+                    axis = combined_rot @ np.array([1.0, 0.0, 0.0])
+                    tilted_pts = (base_pts @ combined_rot.T)
+                    seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
-                # JavaScript (Plotly.js)
-                html_code = f"""
-                <div id="ball_canvas" style="width:100%; height:600px;"></div>
-                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-                <script>
-                    var points = {{ seam: {json.dumps(seam_points)} }};
-                    var axis = {json.dumps(axis.tolist())};
-                    var rpm = {avg_rpm};
-                    var mult = {multiplier};
-                    var cur_angle = 0;
+                    multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
-                    function rotatePoint(p, ax, a) {{
-                        var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
-                        return [
-                            p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
-                            p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
-                            p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
+                    # JavaScript (Plotly.js)
+                    html_code = f"""
+                    <div id="ball_canvas" style="width:100%; height:600px;"></div>
+                    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+                    <script>
+                        var points = {{ seam: {json.dumps(seam_points)} }};
+                        var axis = {json.dumps(axis.tolist())};
+                        var rpm = {avg_rpm};
+                        var mult = {multiplier};
+                        var cur_angle = 0;
+
+                        function rotatePoint(p, ax, a) {{
+                            var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
+                            return [
+                                p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
+                                p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
+                                p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
+                            ];
+                        }}
+
+                        var bx = [], by = [], bz = [], n = 22;
+                        for(var i=0; i<=n; i++) {{
+                            var phi = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
+                            for(var j=0; j<=n; j++) {{
+                                var theta = 2 * Math.PI * j / n;
+                                bx[i][j] = Math.cos(theta) * Math.sin(phi);
+                                by[i][j] = Math.sin(theta) * Math.sin(phi);
+                                bz[i][j] = Math.cos(phi);
+                            }}
+                        }}
+
+                        var data = [
+                            {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#eee'],['1','#eee']], showscale: false, opacity: 0.7 }},
+                            {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 25}} }},
+                            {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 10}} }}
                         ];
-                    }}
 
-                    var bx = [], by = [], bz = [], n = 22;
-                    for(var i=0; i<=n; i++) {{
-                        var phi = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
-                        for(var j=0; j<=n; j++) {{
-                            var theta = 2 * Math.PI * j / n;
-                            bx[i][j] = Math.cos(theta) * Math.sin(phi);
-                            by[i][j] = Math.sin(theta) * Math.sin(phi);
-                            bz[i][j] = Math.cos(phi);
+                        var layout = {{
+                            scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
+                                      aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
+                            margin: {{l:0, r:0, b:0, t:0}}
+                        }};
+
+                        Plotly.newPlot('ball_canvas', data, layout);
+
+                        function animate() {{
+                            cur_angle += mult * (rpm / 60) * (2 * Math.PI) / 1000;
+                            var rx = [], ry = [], rz = [];
+                            for(var i=0; i<points.seam.length; i++) {{
+                                var r = rotatePoint(points.seam[i], axis, cur_angle);
+                                rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
+                                if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
+                            }
+                            Plotly.restyle('ball_canvas', {{x: [rx], y: [ry], z: [rz]}}, [1]);
+                            requestAnimationFrame(animate);
                         }}
-                    }}
-
-                    var data = [
-                        {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#eee'],['1','#eee']], showscale: false, opacity: 0.7 }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 25}} }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 10}} }}
-                    ];
-
-                    var layout = {{
-                        scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
-                                  aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
-                        margin: {{l:0, r:0, b:0, t:0}}
-                    }};
-
-                    Plotly.newPlot('ball_canvas', data, layout);
-
-                    function animate() {{
-                        cur_angle += mult * (rpm / 60) * (2 * Math.PI) / 1000;
-                        var rx = [], ry = [], rz = [];
-                        for(var i=0; i<points.seam.length; i++) {{
-                            var r = rotatePoint(points.seam[i], axis, cur_angle);
-                            rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
-                            if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                        }}
-                        Plotly.restyle('ball_canvas', {{x: [rx], y: [ry], z: [rz]}}, [1]);
-                        requestAnimationFrame(animate);
-                    }}
-                    animate();
-                </script>
-                """
-                st.components.v1.html(html_code, height=600)
+                        animate();
+                    </script>
+                    """
+                    st.components.v1.html(html_code, height=600)
