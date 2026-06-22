@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
-from datetime import date, timedelta
+from datetime import date
 import re
 import os
 import pickle
@@ -282,7 +282,7 @@ with tab1:
 
                     multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
-                    # JavaScript (Plotly.js)
+                    # JavaScript (Plotly.js) - すべての中括弧を {{ }} にエスケープ修正済み
                     html_code = f"""
                     <div id="ball_canvas" style="width:100%; height:600px;"></div>
                     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -334,7 +334,7 @@ with tab1:
                                 var r = rotatePoint(points.seam[i], axis, cur_angle);
                                 rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
                                 if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                            }
+                            }}
                             Plotly.restyle('ball_canvas', {{x: [rx], y: [ry], z: [rz]}}, [1]);
                             requestAnimationFrame(animate);
                         }}
