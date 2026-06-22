@@ -237,7 +237,6 @@ with tab1:
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
                 
-                # --- 安全なカスタム集計の作成 ---
                 agg_dict = {}
                 if c_vel in df.columns:
                     agg_dict[c_vel] = ['mean', 'max']
@@ -251,11 +250,8 @@ with tab1:
                     agg_dict[c_hb] = 'mean'
                 
                 stats_df = df.groupby('Pitch Type').agg(agg_dict).reset_index()
-                
-                # マルチインデックスを結合して一旦フラットにする（例: ('Velocity', 'mean') -> 'Velocity_mean'）
                 stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
-                # 存在する列だけを確実に日本語名にリネーム（辞書マッピング方式で安全化）
                 rename_dict = {
                     f"{c_vel}_mean": "平均球速",
                     f"{c_vel}_max": "最高球速",
@@ -265,8 +261,6 @@ with tab1:
                     f"{c_hb}_mean": "横変化量 (HB)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
-                
-                # テーブル表示
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
                 st.divider()
@@ -292,7 +286,6 @@ with tab1:
 
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
-                    # リネーム後の日本語カラム名（存在する場合のみ）でプロット
                     plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
                     plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
                     
@@ -326,26 +319,35 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
+                    # 基本となるシーム（縫い目）形状の生成
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
                     base_pts = np.vstack([sz, sx, sy]).T 
 
+                    # Tilt（時計の時刻）の角度からスピン軸を計算
                     tilt_rad = np.deg2rad(tilt_deg)
                     cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                     rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
 
+                    # ジャイロ成分（回転効率）の傾きを計算
                     gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
                     cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                     g_sign = 1 if hand == "右" else -1
                     rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
 
+                    # 最終的な回転軸ベクトル
                     combined_rot = rot_gyro @ rot_z
                     axis = combined_rot @ np.array([1.0, 0.0, 0.0])
+                    
+                    # 縫い目の初期配置を回転
                     tilted_pts = (base_pts @ combined_rot.T)
                     seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
-                    multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
+                    # 【修正】球種とTilt時刻の方向にボールが「進んで転がる」ように回転方向を設定
+                    multiplier = 1
+                    if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]):
+                        multiplier = -1
 
                     html_code = f"""
                     <div id="ball_canvas" style="width:100%; height:600px;"></div>
@@ -357,6 +359,7 @@ with tab1:
                         var mult = {multiplier};
                         var cur_angle = 0;
 
+                        // 【修正】指定された回転軸に対して、進行方向（Tilt側）へ順転するようにクォータニオン/ロドリゲス回転の符号を最適化
                         function rotatePoint(p, ax, a) {{
                             var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
                             return [
@@ -384,15 +387,19 @@ with tab1:
                         ];
 
                         var layout = {{
-                            scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
-                                      aspectmode: 'cube', camera: {{ eye: {{x: 0, y: 0, z: 2.3}} }} }},
+                            scene: {{ 
+                                xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
+                                aspectmode: 'cube', 
+                                camera: {{ eye: {{x: 0, y: -2.3, z: 0}} }} // 捕手・打者側（正面）からの視点に固定
+                            }},
                             margin: {{l:0, r:0, b:0, t:0}}
                         }};
 
                         Plotly.newPlot('ball_canvas', data, layout);
 
                         function animate() {{
-                            cur_angle += mult * (rpm / 60) * (2 * Math.PI) / 1000;
+                            // 時間経過による回転角の蓄積（進行方向を一致させるためにマイナス制御）
+                            cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 1000;
                             var rx = [], ry = [], rz = [];
                             for(var i=0; i<points.seam.length; i++) {{
                                 var r = rotatePoint(points.seam[i], axis, cur_angle);
