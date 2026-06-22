@@ -80,7 +80,7 @@ def time_to_degrees(time_str):
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
 # ==========================================
-# タブ2：データ登録
+# タブ2：データ登録・削除
 # ==========================================
 with tab2:
     st.header("データ登録 (Rapsodo / Trackman対応)")
@@ -89,7 +89,6 @@ with tab2:
         target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
         target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
     
-    # CSVに加えてExcel形式 (.xlsx, .xls) も受け付けるように変更
     uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
 
     if uploaded_file is not None:
@@ -97,9 +96,7 @@ with tab2:
             try:
                 file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                 
-                # 拡張子によって読み込み方法を分岐
                 if file_ext == '.csv':
-                    # ヘッダー位置を自動探索 (CSV用)
                     temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
                     skip = 0
                     for i, row in temp_df.iterrows():
@@ -110,7 +107,6 @@ with tab2:
                     uploaded_file.seek(0)
                     new_df = pd.read_csv(uploaded_file, skiprows=skip)
                 else:
-                    # Excel用 (ヘッダー自動探索)
                     temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
                     skip = 0
                     for i, row in temp_df.iterrows():
@@ -120,16 +116,13 @@ with tab2:
                             break
                     new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
-                # カラム変換
                 new_df = new_df.rename(columns=COLUMN_MAP)
                 
-                # 数値クレンジング
                 cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                 for c in cols_to_num:
                     if c in new_df.columns:
                         new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-                # 蓄積
                 if target_player not in st.session_state['stored_data']:
                     st.session_state['stored_data'][target_player] = {}
                 
@@ -145,6 +138,44 @@ with tab2:
             except Exception as e:
                 st.error(f"読み込みエラー: {e}")
 
+    # ---- 削除機能セクション ----
+    st.divider()
+    st.subheader("🗑️ 登録データの削除")
+    
+    # データが存在する選手のみ削除対象に選べる
+    if st.session_state['stored_data']:
+        del_player = st.selectbox("データ削除する選手を選択", sorted(st.session_state['stored_data'].keys()), key="del_p")
+        
+        if del_player in st.session_state['stored_data'] and st.session_state['stored_data'][del_player]:
+            available_del_dates = sorted(st.session_state['stored_data'][del_player].keys(), reverse=True)
+            
+            del_mode = st.radio("削除モード", ["選択した日付のデータを削除", "この選手の全データを削除"])
+            
+            if del_mode == "選択した日付のデータを削除":
+                del_date = st.selectbox("削除する日付を選択", available_del_dates, key="del_d")
+                if st.button(f"🚨 {del_player} の {del_date} のデータを削除する"):
+                    del st.session_state['stored_data'][del_player][del_date]
+                    
+                    # 日付が空になったら選手キーごと削除
+                    if not st.session_state['stored_data'][del_player]:
+                        del st.session_state['stored_data'][del_player]
+                        
+                    save_persistent_data(st.session_state['stored_data'])
+                    st.success(f"{del_player} の {del_date} のデータを削除しました。")
+                    st.rerun()
+            
+            elif del_mode == "この選手の全データを削除":
+                st.warning("これまでの全ての測定データが完全に削除されます。")
+                if st.button(f"💥 {del_player} の全データを完全に削除する"):
+                    del st.session_state['stored_data'][del_player]
+                    save_persistent_data(st.session_state['stored_data'])
+                    st.success(f"{del_player} の全データを削除しました。")
+                    st.rerun()
+        else:
+            st.info("選択された選手の登録データはありません。")
+    else:
+        st.info("システム内に登録されているデータがありません。")
+
 # ==========================================
 # タブ1：分析フィードバック
 # ==========================================
@@ -158,13 +189,11 @@ with tab1:
         with sel_c1:
             p_name = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
         
-        # 該当選手の登録がある最古の日付と最新の日付を取得
         available_dates = sorted(st.session_state['stored_data'][p_name].keys())
         min_date = date.fromisoformat(available_dates[0]) if available_dates else date.today()
         max_date = date.fromisoformat(available_dates[-1]) if available_dates else date.today()
         
         with sel_c2:
-            # 日付の「範囲」を選択できるように変更
             date_range = st.date_input(
                 "分析対象の期間を選択",
                 value=(min_date, max_date),
@@ -172,11 +201,9 @@ with tab1:
                 max_value=max_date
             )
         
-        # 期間選択が正しく（開始日と終了日の両方）行われているかチェック
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
             
-            # 指定された期間内のデータを結合
             matched_dfs = []
             for d_str, d_df in st.session_state['stored_data'][p_name].items():
                 cur_d = date.fromisoformat(d_str)
@@ -189,23 +216,18 @@ with tab1:
             else:
                 df = pd.concat(matched_dfs, ignore_index=True).copy()
         else:
-            # 選択中の段階（片方しか選ばれていないなど）は空のDataFrameにしておく
             df = pd.DataFrame()
 
         if not df.empty:
             hand = PLAYER_HANDS.get(p_name, "右")
-
-            # 内部変数定義
             c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
             if 'Pitch Type' in df.columns:
-                # 1. データテーブル
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date})")
                 stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
                 stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
-                # 2. 変化量マップ (横並び)
                 st.divider()
                 st.subheader("📈 変化量マップ (全投球 vs 球種別平均)")
                 plot_col1, plot_col2 = st.columns(2)
@@ -243,12 +265,10 @@ with tab1:
                     )
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # 3. 3Dスピンビジュアライザー
                 st.divider()
                 st.subheader("⚾️ 3Dスピンビジュアライザー")
                 valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
                 if not valid_df.empty:
-                    # 安全にユニークな球種を取得
                     available_types = sorted(valid_df['Pitch Type'].dropna().unique())
                     sel_type = st.selectbox("球種を選択して回転を確認:", available_types)
                     
@@ -260,7 +280,6 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
-                    # --- 3D描画用計算 ---
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
@@ -282,7 +301,6 @@ with tab1:
 
                     multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
-                    # JavaScript (Plotly.js) - すべての中括弧を {{ }} にエスケープ修正済み
                     html_code = f"""
                     <div id="ball_canvas" style="width:100%; height:600px;"></div>
                     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
