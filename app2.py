@@ -237,7 +237,7 @@ with tab1:
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
                 
-                # --- カスタム集計の作成 (球速の平均・最高、回転数平均など) ---
+                # --- 安全なカスタム集計の作成 ---
                 agg_dict = {}
                 if c_vel in df.columns:
                     agg_dict[c_vel] = ['mean', 'max']
@@ -252,14 +252,21 @@ with tab1:
                 
                 stats_df = df.groupby('Pitch Type').agg(agg_dict).reset_index()
                 
-                # マルチインデックスの階層をフラットにして分かりやすい名前へ変更
-                stats_df.columns = [
-                    'Pitch Type', 
-                    '平均球速', '最高球速', 
-                    '平均回転数', '回転効率 (%)', 
-                    '縦変化量 (VB)', '横変化量 (HB)'
-                ][:len(stats_df.columns)]
+                # マルチインデックスを結合して一旦フラットにする（例: ('Velocity', 'mean') -> 'Velocity_mean'）
+                stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
+                # 存在する列だけを確実に日本語名にリネーム（辞書マッピング方式で安全化）
+                rename_dict = {
+                    f"{c_vel}_mean": "平均球速",
+                    f"{c_vel}_max": "最高球速",
+                    f"{c_rev}_mean": "平均回転数",
+                    f"{c_eff}_mean": "回転効率 (%)",
+                    f"{c_vb}_mean": "縦変化量 (VB)",
+                    f"{c_hb}_mean": "横変化量 (HB)"
+                }
+                stats_df = stats_df.rename(columns=rename_dict)
+                
+                # テーブル表示
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
                 st.divider()
@@ -272,7 +279,7 @@ with tab1:
                         df, x=c_hb, y=c_vb, color='Pitch Type',
                         range_x=[-60, 60], range_y=[-60, 60],
                         color_discrete_map=COLOR_MAP_PITCH,
-                        hover_data=['Data Type', c_vel] # ホバー時に球速も見れるように
+                        hover_data=['Data Type', c_vel]
                     )
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
@@ -285,9 +292,12 @@ with tab1:
 
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
-                    # stats_dfから正しい列名でマッピング
+                    # リネーム後の日本語カラム名（存在する場合のみ）でプロット
+                    plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
+                    plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
+                    
                     fig_avg = px.scatter(
-                        stats_df, x='横変化量 (HB)', y='縦変化量 (VB)', color='Pitch Type',
+                        stats_df, x=plot_x, y=plot_y, color='Pitch Type',
                         text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
                         color_discrete_map=COLOR_MAP_PITCH
                     )
