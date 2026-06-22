@@ -90,7 +90,6 @@ with tab2:
     with col_reg2:
         target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
     with col_reg3:
-        # ブルペン / シートBT の分類選択を追加
         data_type = st.radio("練習種別（分類）", ["ブルペン", "シートBT"], horizontal=True)
     
     uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
@@ -121,8 +120,6 @@ with tab2:
                     new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
                 new_df = new_df.rename(columns=COLUMN_MAP)
-                
-                # 分類カラムを追加
                 new_df['Data Type'] = data_type
                 
                 cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
@@ -136,10 +133,8 @@ with tab2:
                 date_key = str(target_date)
                 if date_key in st.session_state['stored_data'][target_player]:
                     existing = st.session_state['stored_data'][target_player][date_key]
-                    
-                    # 過去データに分類カラム（Data Type）がない場合の互換性ケア
                     if 'Data Type' not in existing.columns:
-                        existing['Data Type'] = 'ブルペン' # デフォルト補完
+                        existing['Data Type'] = 'ブルペン'
                         
                     new_df = pd.concat([existing, new_df], ignore_index=True).drop_duplicates()
                 
@@ -159,7 +154,6 @@ with tab2:
         
         if del_player in st.session_state['stored_data'] and st.session_state['stored_data'][del_player]:
             available_del_dates = sorted(st.session_state['stored_data'][del_player].keys(), reverse=True)
-            
             del_mode = st.radio("削除モード", ["選択した日付のデータを削除", "この選手の全データを削除"])
             
             if del_mode == "選択した日付のデータを削除":
@@ -210,7 +204,6 @@ with tab1:
             )
             
         with sel_c3:
-            # 表示する練習形式の分類フィルター（個別・両方）を追加
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"])
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -227,12 +220,9 @@ with tab1:
                 df = pd.DataFrame()
             else:
                 df = pd.concat(matched_dfs, ignore_index=True).copy()
-                
-                # 過去データに分類カラムがない場合を想定した処理
                 if 'Data Type' not in df.columns:
                     df['Data Type'] = 'ブルペン'
                 
-                # フィルター処理
                 if view_type == "ブルペンのみ":
                     df = df[df['Data Type'] == "ブルペン"]
                 elif view_type == "シートBTのみ":
@@ -242,12 +232,34 @@ with tab1:
 
         if not df.empty:
             hand = PLAYER_HANDS.get(p_name, "右")
-            c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
+            c_dir, c_rev, c_eff, c_vb, c_hb, c_vel = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity'
 
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
-                stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
-                stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
+                
+                # --- カスタム集計の作成 (球速の平均・最高、回転数平均など) ---
+                agg_dict = {}
+                if c_vel in df.columns:
+                    agg_dict[c_vel] = ['mean', 'max']
+                if c_rev in df.columns:
+                    agg_dict[c_rev] = 'mean'
+                if c_eff in df.columns:
+                    agg_dict[c_eff] = 'mean'
+                if c_vb in df.columns:
+                    agg_dict[c_vb] = 'mean'
+                if c_hb in df.columns:
+                    agg_dict[c_hb] = 'mean'
+                
+                stats_df = df.groupby('Pitch Type').agg(agg_dict).reset_index()
+                
+                # マルチインデックスの階層をフラットにして分かりやすい名前へ変更
+                stats_df.columns = [
+                    'Pitch Type', 
+                    '平均球速', '最高球速', 
+                    '平均回転数', '回転効率 (%)', 
+                    '縦変化量 (VB)', '横変化量 (HB)'
+                ][:len(stats_df.columns)]
+                
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
                 st.divider()
@@ -260,7 +272,7 @@ with tab1:
                         df, x=c_hb, y=c_vb, color='Pitch Type',
                         range_x=[-60, 60], range_y=[-60, 60],
                         color_discrete_map=COLOR_MAP_PITCH,
-                        hover_data=['Data Type'] # ホバー時にブルペンかシートBTか見えるように
+                        hover_data=['Data Type', c_vel] # ホバー時に球速も見れるように
                     )
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
@@ -273,8 +285,9 @@ with tab1:
 
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
+                    # stats_dfから正しい列名でマッピング
                     fig_avg = px.scatter(
-                        stats_df, x=c_hb, y=c_vb, color='Pitch Type',
+                        stats_df, x='横変化量 (HB)', y='縦変化量 (VB)', color='Pitch Type',
                         text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
                         color_discrete_map=COLOR_MAP_PITCH
                     )
