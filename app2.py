@@ -319,32 +319,30 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
-                    # 基本となるシーム（縫い目）形状の生成
+                    # 基本シーム（縫い目）形状の生成
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
+                    # 【修正】初期段階で完全に正面（Z-X平面、視点に正対）を向くように配列の軸割当てを整理
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-                    base_pts = np.vstack([sz, sx, sy]).T 
+                    base_pts = np.vstack([sx, sz, sy]).T 
 
-                    # Tilt（時計の時刻）の角度からスピン軸を計算
+                    # 12時方向（上）を基準に時計回りに回転方向を設定
                     tilt_rad = np.deg2rad(tilt_deg)
                     cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
-                    rot_z = np.array([[cos_t, sin_t, 0], [-sin_t, cos_t, 0], [0, 0, 1]])
+                    rot_y = np.array([[cos_t, 0, -sin_t], [0, 1, 0], [sin_t, 0, cos_t]])
 
-                    # ジャイロ成分（回転効率）の傾きを計算
+                    # ジャイロ成分の反映
                     gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-                    cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
-                    g_sign = 1 if hand == "右" else -1
-                    rot_gyro = np.array([[cos_g, 0, g_sign*sin_g], [0, 1, 0], [-g_sign*sin_g, 0, cos_g]])
+                    cos_g, sin_g = Math_cos, Math_sin = np.cos(gyro_rad), np.sin(gyro_rad)
+                    g_sign = -1 if hand == "右" else 1
+                    rot_gyro = np.array([[1, 0, 0], [0, cos_g, g_sign*sin_g], [0, -g_sign*sin_g, cos_g]])
 
-                    # 最終的な回転軸ベクトル
-                    combined_rot = rot_gyro @ rot_z
-                    axis = combined_rot @ np.array([1.0, 0.0, 0.0])
+                    combined_rot = rot_y @ rot_gyro
+                    axis = combined_rot @ np.array([0.0, 0.0, 1.0])
                     
-                    # 縫い目の初期配置を回転
                     tilted_pts = (base_pts @ combined_rot.T)
                     seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
-                    # 【修正】球種とTilt時刻の方向にボールが「進んで転がる」ように回転方向を設定
                     multiplier = 1
                     if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]):
                         multiplier = -1
@@ -359,7 +357,6 @@ with tab1:
                         var mult = {multiplier};
                         var cur_angle = 0;
 
-                        // 【修正】指定された回転軸に対して、進行方向（Tilt側）へ順転するようにクォータニオン/ロドリゲス回転の符号を最適化
                         function rotatePoint(p, ax, a) {{
                             var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
                             return [
@@ -390,7 +387,7 @@ with tab1:
                             scene: {{ 
                                 xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
                                 aspectmode: 'cube', 
-                                camera: {{ eye: {{x: 0, y: -2.3, z: 0}} }} // 捕手・打者側（正面）からの視点に固定
+                                camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} // 【修正】完全に真正面から見据えるカメラ配置
                             }},
                             margin: {{l:0, r:0, b:0, t:0}}
                         }};
@@ -398,7 +395,6 @@ with tab1:
                         Plotly.newPlot('ball_canvas', data, layout);
 
                         function animate() {{
-                            // 時間経過による回転角の蓄積（進行方向を一致させるためにマイナス制御）
                             cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 1000;
                             var rx = [], ry = [], rz = [];
                             for(var i=0; i<points.seam.length; i++) {{
