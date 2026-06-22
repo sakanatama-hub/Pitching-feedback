@@ -84,10 +84,14 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"
 # ==========================================
 with tab2:
     st.header("データ登録 (Rapsodo / Trackman対応)")
-    col_reg1, col_reg2 = st.columns(2)
+    col_reg1, col_reg2, col_reg3 = st.columns(3)
     with col_reg1:
         target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
+    with col_reg2:
         target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
+    with col_reg3:
+        # ブルペン / シートBT の分類選択を追加
+        data_type = st.radio("練習種別（分類）", ["ブルペン", "シートBT"], horizontal=True)
     
     uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
 
@@ -118,6 +122,9 @@ with tab2:
 
                 new_df = new_df.rename(columns=COLUMN_MAP)
                 
+                # 分類カラムを追加
+                new_df['Data Type'] = data_type
+                
                 cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                 for c in cols_to_num:
                     if c in new_df.columns:
@@ -129,11 +136,16 @@ with tab2:
                 date_key = str(target_date)
                 if date_key in st.session_state['stored_data'][target_player]:
                     existing = st.session_state['stored_data'][target_player][date_key]
+                    
+                    # 過去データに分類カラム（Data Type）がない場合の互換性ケア
+                    if 'Data Type' not in existing.columns:
+                        existing['Data Type'] = 'ブルペン' # デフォルト補完
+                        
                     new_df = pd.concat([existing, new_df], ignore_index=True).drop_duplicates()
                 
                 st.session_state['stored_data'][target_player][date_key] = new_df
                 save_persistent_data(st.session_state['stored_data'])
-                st.success(f"{target_player} のデータを保存しました。")
+                st.success(f"{target_player} のデータを [{data_type}] として保存しました。")
                 st.balloons()
             except Exception as e:
                 st.error(f"読み込みエラー: {e}")
@@ -142,7 +154,6 @@ with tab2:
     st.divider()
     st.subheader("🗑️ 登録データの削除")
     
-    # データが存在する選手のみ削除対象に選べる
     if st.session_state['stored_data']:
         del_player = st.selectbox("データ削除する選手を選択", sorted(st.session_state['stored_data'].keys()), key="del_p")
         
@@ -155,11 +166,8 @@ with tab2:
                 del_date = st.selectbox("削除する日付を選択", available_del_dates, key="del_d")
                 if st.button(f"🚨 {del_player} の {del_date} のデータを削除する"):
                     del st.session_state['stored_data'][del_player][del_date]
-                    
-                    # 日付が空になったら選手キーごと削除
                     if not st.session_state['stored_data'][del_player]:
                         del st.session_state['stored_data'][del_player]
-                        
                     save_persistent_data(st.session_state['stored_data'])
                     st.success(f"{del_player} の {del_date} のデータを削除しました。")
                     st.rerun()
@@ -185,7 +193,7 @@ with tab1:
     if not st.session_state['stored_data']:
         st.info("データが登録されていません。「データ登録」タブからアップロードしてください。")
     else:
-        sel_c1, sel_c2 = st.columns(2)
+        sel_c1, sel_c2, sel_c3 = st.columns(3)
         with sel_c1:
             p_name = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
         
@@ -200,6 +208,10 @@ with tab1:
                 min_value=min_date,
                 max_value=max_date
             )
+            
+        with sel_c3:
+            # 表示する練習形式の分類フィルター（個別・両方）を追加
+            view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"])
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
@@ -215,6 +227,16 @@ with tab1:
                 df = pd.DataFrame()
             else:
                 df = pd.concat(matched_dfs, ignore_index=True).copy()
+                
+                # 過去データに分類カラムがない場合を想定した処理
+                if 'Data Type' not in df.columns:
+                    df['Data Type'] = 'ブルペン'
+                
+                # フィルター処理
+                if view_type == "ブルペンのみ":
+                    df = df[df['Data Type'] == "ブルペン"]
+                elif view_type == "シートBTのみ":
+                    df = df[df['Data Type'] == "シートBT"]
         else:
             df = pd.DataFrame()
 
@@ -223,7 +245,7 @@ with tab1:
             c_dir, c_rev, c_eff, c_vb, c_hb = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB'
 
             if 'Pitch Type' in df.columns:
-                st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date})")
+                st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
                 stats_cols = [c for c in [c_rev, c_eff, c_vb, c_hb] if c in df.columns]
                 stats_df = df.groupby('Pitch Type')[stats_cols].mean().reset_index()
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
@@ -237,7 +259,8 @@ with tab1:
                     fig_all = px.scatter(
                         df, x=c_hb, y=c_vb, color='Pitch Type',
                         range_x=[-60, 60], range_y=[-60, 60],
-                        color_discrete_map=COLOR_MAP_PITCH
+                        color_discrete_map=COLOR_MAP_PITCH,
+                        hover_data=['Data Type'] # ホバー時にブルペンかシートBTか見えるように
                     )
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
@@ -360,3 +383,5 @@ with tab1:
                     </script>
                     """
                     st.components.v1.html(html_code, height=600)
+        else:
+            st.warning("選択した条件（期間・練習種別）に一致するデータがありません。")
