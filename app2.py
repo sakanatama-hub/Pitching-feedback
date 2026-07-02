@@ -78,6 +78,7 @@ def load_data_from_github(file_path):
         download_url = content["download_url"]
         file_res = requests.get(download_url)
         return pd.read_excel(io.BytesIO(file_res.content))
+        df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
     else:
         return pd.DataFrame()
 
