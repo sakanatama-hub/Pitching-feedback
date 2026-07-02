@@ -98,9 +98,11 @@ COLOR_MAP_PITCH = {
 
 # カラム名統一用のマップ
 COLUMN_MAP = {
+    # トラックマン
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
     'SpinEfficiency': 'Spin Efficiency',
+    # ラプソード
     'Total Spin': 'Spin Rate',
     'True Spin (release)': 'True Spin',
     'Spin Efficiency (release)': 'Spin Efficiency',
@@ -165,7 +167,7 @@ with tab2:
                         new_df['Player Name'] = target_player
                         new_df['Date'] = target_date.strftime('%Y-%m-%d')
                         new_df['Data Type'] = data_type
-                        new_df['Data Source'] = data_source  # 💡「Trackman（トラックマン）」か「Rapsodo（ラプソード）」を保存
+                        new_df['Data Source'] = data_source
                         
                         cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                         for c in cols_to_num:
@@ -218,7 +220,7 @@ with tab2:
                                 st.session_state['pitch_df'] = updated_db
                                 st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
                             else:
-                                st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
+                                r = st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
                 except Exception as e:
                     st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
 
@@ -229,14 +231,19 @@ with tab2:
 with tab1:
     st.header("投球解析フィードバック")
     
-    df_all = st.session_state['pitch_df']
+    df_all = st.session_state['pitch_df'].copy()
     
     if df_all.empty:
         st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録・削除」タブからアップロードしてください。")
     else:
+        # 💡 【バグ対策】既存データに 'Data Source' カラムが欠損していた場合、安全のためにTrackmanを補完
+        if 'Data Source' not in df_all.columns:
+            df_all['Data Source'] = "Trackman（トラックマン）"
+        else:
+            df_all['Data Source'] = df_all['Data Source'].fillna("Trackman（トラックマン）")
+
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
-        # 💡 レイアウトを調整し、4カラムにして「データ元（機器）フィルター」を追加
         sel_c1, sel_c2, sel_c3, sel_c4 = st.columns(4)
         with sel_c1:
             p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
@@ -252,22 +259,18 @@ with tab1:
         with sel_c3:
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"], key="pitch_view_type")
         with sel_c4:
-            # 💡 ここでトラックマンとラプソードの出し分けを選択可能に
             source_filter = st.selectbox("データ元フィルター", ["両方（すべて表示）", "Trackmanのみ", "Rapsodoのみ"], key="pitch_view_source")
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
             df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
-            # 練習種別でのフィルタリング
             if view_type == "ブルペンのみ":
                 df = df[df['Data Type'] == "ブルペン"]
             elif view_type == "シートBTのみ":
                 df = df[df['Data Type'] == "シートBT"]
                 
-            # 💡 データ元（機器）でのフィルタリング
             if source_filter == "Trackmanのみ":
-                # 過去のデータで「Data Source」カラムが無いものはTrackmanとして扱う、または前後の文字で判定
                 df = df[df['Data Source'].astype(str).str.contains("Trackman")]
             elif source_filter == "Rapsodoのみ":
                 df = df[df['Data Source'].astype(str).str.contains("Rapsodo")]
@@ -301,10 +304,14 @@ with tab1:
                 st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
 
+                # 💡 【バグ対策】グラフホバー時に利用するリストを動的に構築
+                hover_items = ['Data Type', c_vel]
+                if 'Data Source' in df.columns:
+                    hover_items.append('Data Source')
+
                 with plot_col1:
                     st.write("▼ 全投球プロット")
-                    # ホバー時にどちらの機器のデータか分かるように 'Data Source' も追加
-                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=['Data Type', 'Data Source', c_vel])
+                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=hover_items)
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
@@ -417,4 +424,4 @@ with tab1:
                     """
                     st.components.v1.html(html_code, height=600)
         else:
-            st.warning("選択した期間・条件（練習種別、データ元など）に一致するデータがありません。")
+            st.warning("選択した期間・条件に一致するデータがありません。")
