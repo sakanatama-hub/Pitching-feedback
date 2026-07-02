@@ -7,38 +7,45 @@ from datetime import date
 import re
 import os
 import io
-import requests  # GitHub API用に追加
+import requests
 
 # --- 1. ページ設定 ---
-st.set_page_config(layout="wide", page_title="投球解析システム (統合版)")
+st.set_page_config(layout="wide", page_title="投球解析システム")
 
-# --- 2. GitHubデータ永続化の設定 ---
-# ※打撃アプリと同じ設定項目（Secrets等）を使用してください
-GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
-GITHUB_REPO = "sakanatama-hub/Batting-feedback"  # ご自身のユーザー名/リポジトリ名
-GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"   # 投球データの保存先パス（必要に応じて変更してください）
+# --- 2. 投球アプリ専用：GitHubデータ永続化設定 ---
+# Secretsから指定されたトークン名、または汎用トークンを自動探索
+GITHUB_TOKEN = st.secrets.get("Pitching-feedback") or st.secrets.get("GITHUB_TOKEN") or st.secrets.get("PITCH_GITHUB_TOKEN", "")
+GITHUB_REPO = "sakanatama-hub/Batting-feedback"  # ユーザー名 / リポジトリ名
+GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"  # リポジトリ内の保存先パス
 
 def load_data_from_github(file_path):
-    """GitHubからExcelファイルを読み込む関数"""
+    """GitHubから投球データのExcelファイルを読み込む"""
+    if not GITHUB_TOKEN:
+        st.error("StreamlitのSecretsにトークン（'Pitching-feedback'）が設定されていないため、GitHubからデータを読み込めません。")
+        return pd.DataFrame()
+        
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     res = requests.get(url, headers=headers)
+    
     if res.status_code == 200:
         content = res.json()
         download_url = content["download_url"]
         file_res = requests.get(download_url)
-        # ExcelファイルをDataFrameとして読み込み
         return pd.read_excel(io.BytesIO(file_res.content))
     else:
-        # ファイルが存在しない場合は空のDataFrameを返す
+        # ファイルがまだ無い場合は初期の空のDataFrameを返す
         return pd.DataFrame()
 
 def save_to_github(df, file_path):
-    """DataFrameをExcelにしてGitHubへプッシュ・保存する関数"""
+    """投球データをExcel化してGitHubへ保存・上書きする"""
+    if not GITHUB_TOKEN:
+        return False, "トークン（'Pitching-feedback'）が設定されていません。"
+        
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    # Excelデータに変換
+    # メモリ上でExcelデータを作成
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
@@ -47,12 +54,12 @@ def save_to_github(df, file_path):
     import base64
     content_b64 = base64.b64encode(excel_data).decode("utf-8")
     
-    # 既存ファイルのSHAを取得（上書きに必要）
+    # 既存ファイルのSHA（上書き用ID）を取得
     res = requests.get(url, headers=headers)
     sha = res.json().get("sha") if res.status_code == 200 else None
     
     payload = {
-        "message": "Update pitch data via Streamlit",
+        "message": "Update pitch data via Pitch Feedback App",
         "content": content_b64
     }
     if sha:
@@ -64,7 +71,7 @@ def save_to_github(df, file_path):
     else:
         return False, put_res.json().get("message", "Unknown error")
 
-# --- アプリ起動時にGitHubから最新データを一括読込 ---
+# --- アプリ起動時：GitHubから最新の投球データベースを読み込み ---
 if 'pitch_df' not in st.session_state:
     with st.spinner("GitHubから最新の投球データを読み込み中..."):
         st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
@@ -87,6 +94,7 @@ COLOR_MAP_PITCH = {
     "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
 }
 
+# 外部データのカラム名を統一するマップ
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
@@ -103,26 +111,28 @@ def time_to_degrees(time_str):
     except:
         return 0.0
 
-tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
+# --- タブ構造の定義 ---
+tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録"])
 
 # ==========================================
-# タブ2：データ登録（GitHub連動版）
+# タブ2：投手データ登録
 # ==========================================
 with tab2:
-    st.header("データ登録 (GitHub外部ストレージ同期)")
+    st.header("📝 投手データ登録")
+    
     col_reg1, col_reg2, col_reg3 = st.columns(3)
     with col_reg1:
-        target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
+        target_player = st.selectbox("登録する選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
     with col_reg2:
-        target_date = st.date_input("測定日を選択", date.today(), key="reg_d")
+        target_date = st.date_input("投球日を選択", date.today(), key="pitch_reg_d")
     with col_reg3:
-        data_type = st.radio("練習種別（分類）", ["ブルペン", "シートBT"], horizontal=True)
+        data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
     
-    uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
+    uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
 
     if uploaded_file is not None:
-        if st.button("投球データをGitHubへ保存"):
-            with st.spinner("データを処理してGitHubへ保存中..."):
+        if st.button("投球データをGitHubへ保存", key="btn_save_pitch"):
+            with st.spinner("データを処理してGitHubへ同期保存中..."):
                 try:
                     file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                     if file_ext == '.csv':
@@ -135,22 +145,22 @@ with tab2:
                         skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
                         new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
-                    # カラム変換と基本データの付与
+                    # カラム変換とメタデータを追加
                     new_df = new_df.rename(columns=COLUMN_MAP)
                     new_df['Player Name'] = target_player
                     new_df['Date'] = target_date.strftime('%Y-%m-%d')
                     new_df['Data Type'] = data_type
                     
-                    # 数値型へのクリーニング
+                    # 数値データのクレンジング
                     cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                     for c in cols_to_num:
                         if c in new_df.columns:
                             new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-                    # GitHubから最新のデータベースを取得して結合
+                    # GitHubから現在の最新データを取得してマージ
                     latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                     if not latest_db.empty:
-                        # 既存の同一選手・同一日・同一区別のデータがあれば重複を避けるため一度消して上書き合流
+                        # 同一選手・同日・同区別のデータがあれば上書き対象として一旦除外
                         modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
                                                   (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
                                                   (latest_db['Data Type'] == data_type))]
@@ -158,19 +168,19 @@ with tab2:
                     else:
                         updated_db = new_df
 
-                    # GitHubへプッシュ
+                    # GitHubのストレージファイルを更新
                     success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
                     if success:
-                        st.session_state['pitch_df'] = updated_db  # アプリ内の表示データも更新
-                        st.success(f"✅ {target_player} のデータを [{data_type}] としてGitHubに同期保存しました！")
+                        st.session_state['pitch_df'] = updated_db  # セッション状態も最新化
+                        st.success(f"✅ {target_player} のデータを [{data_type}] としてGitHubへ保存しました！")
                         st.balloons()
                     else:
                         st.error(f"❌ GitHubへの保存に失敗しました: {message}")
                 except Exception as e:
-                    st.error(f"❌ 読み込みエラー: {e}")
+                    st.error(f"❌ 解析・保存エラー: {e}")
 
 # ==========================================
-# タブ1：分析フィードバック（GitHubデータ読込版）
+# タブ1：分析フィードバック
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
@@ -178,28 +188,24 @@ with tab1:
     df_all = st.session_state['pitch_df']
     
     if df_all.empty:
-        st.info("データが登録されていないか、GitHub上のデータファイルが空です。")
+        st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録」タブからアップロードしてください。")
     else:
-        # 登録されているユニークな選手一覧を抽出
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
         sel_c1, sel_c2, sel_c3 = st.columns(3)
         with sel_c1:
-            p_name = st.selectbox("分析する選手", available_players)
+            p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
         
-        # 選択された選手のデータのみにフィルタリング
         df_player = df_all[df_all['Player Name'] == p_name].copy()
-        
-        # 日付範囲の設定
         df_player['Date'] = pd.to_datetime(df_player['Date']).dt.date
         available_dates = sorted(df_player['Date'].unique())
         min_date = available_dates[0] if available_dates else date.today()
         max_date = available_dates[-1] if available_dates else date.today()
         
         with sel_c2:
-            date_range = st.date_input("分析対象の期間を選択", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+            date_range = st.date_input("分析対象の期間を選択", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="pitch_view_d")
         with sel_c3:
-            view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"])
+            view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"], key="pitch_view_type")
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
@@ -258,13 +264,13 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 3Dスピンビジュアライザー（正面配置） ---
+                # --- 3Dスピンビジュアライザー ---
                 st.divider()
                 st.subheader("⚾️ 3Dスピンビジュアライザー")
                 valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
                 if not valid_df.empty:
                     available_types = sorted(valid_df['Pitch Type'].dropna().unique())
-                    sel_type = st.selectbox("球種を選択して回転を確認:", available_types)
+                    sel_type = st.selectbox("球種を選択して回転を確認:", available_types, key="pitch_viz_select")
                     
                     subset = valid_df[valid_df['Pitch Type'] == sel_type]
                     avg_rpm = subset[c_rev].mean()
@@ -354,4 +360,4 @@ with tab1:
                     """
                     st.components.v1.html(html_code, height=600)
         else:
-            st.warning("選択した条件に一致するデータがありません。")
+            st.warning("選択した期間・条件に一致するデータがありません。")
