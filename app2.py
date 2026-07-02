@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
-from datetime import date
+from datetime import date, timedelta
 import re
 import os
 import io
@@ -98,11 +98,9 @@ COLOR_MAP_PITCH = {
 
 # カラム名統一用のマップ
 COLUMN_MAP = {
-    # トラックマン
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
     'SpinEfficiency': 'Spin Efficiency',
-    # ラプソード
     'Total Spin': 'Spin Rate',
     'True Spin (release)': 'True Spin',
     'Spin Efficiency (release)': 'Spin Efficiency',
@@ -142,7 +140,6 @@ with tab2:
     
     manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True)
     
-    # --- データ登録モード ---
     if "登録" in manage_mode:
         st.subheader("📥 投球データのアップロード")
         data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True)
@@ -193,7 +190,6 @@ with tab2:
                     except Exception as e:
                         st.error(f"❌ 解析・保存エラー: {e}")
 
-    # --- データ削除モード ---
     else:
         st.subheader("🗑️ 登録済みデータの削除")
         st.warning(f"現在、上の選択欄で「{target_player}」の「{target_date.strftime('%Y-%m-%d')}」における「{data_type}」が選択されています。")
@@ -220,7 +216,7 @@ with tab2:
                                 st.session_state['pitch_df'] = updated_db
                                 st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
                             else:
-                                r = st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
+                                st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
                 except Exception as e:
                     st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
 
@@ -236,7 +232,6 @@ with tab1:
     if df_all.empty:
         st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録・削除」タブからアップロードしてください。")
     else:
-        # 💡 【バグ対策】既存データに 'Data Source' カラムが欠損していた場合、安全のためにTrackmanを補完
         if 'Data Source' not in df_all.columns:
             df_all['Data Source'] = "Trackman（トラックマン）"
         else:
@@ -244,25 +239,77 @@ with tab1:
 
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
+        # 💡 レイアウト：4つの操作カラム
         sel_c1, sel_c2, sel_c3, sel_c4 = st.columns(4)
         with sel_c1:
             p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
         
         df_player = df_all[df_all['Player Name'] == p_name].copy()
         df_player['Date'] = pd.to_datetime(df_player['Date']).dt.date
+        
+        # 💡 期間の選択肢を動的に設定
+        today = date.today()
+        current_year = today.year
+        
+        # データベースからこの選手が持っている最新のデータの年を基準にする（未来日付の対策）
         available_dates = sorted(df_player['Date'].unique())
-        min_date = available_dates[0] if available_dates else date.today()
-        max_date = available_dates[-1] if available_dates else date.today()
+        if available_dates:
+            target_year = available_dates[-1].year
+        else:
+            target_year = current_year
+
+        period_options = ["今日", "今週", "今月"]
+        for m in range(1, 12 + 1):
+            period_options.append(f"{m}月")
+        period_options.append("カスタム")
         
         with sel_c2:
-            date_range = st.date_input("分析対象の期間を選択", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="pitch_view_d")
+            selected_period = st.selectbox("分析対象の期間", period_options, index=2, key="pitch_period_select") # デフォルトは今月
+        
+        # 💡 選択した期間に応じて自動で開始日と終了日を計算
+        start_date, end_date = None, None
+        show_custom_picker = False
+        
+        if selected_period == "今日":
+            start_date, end_date = today, today
+        elif selected_period == "今週":
+            start_date = today - timedelta(days=6)
+            end_date = today
+        elif selected_period == "今月":
+            start_date = today.replace(day=1)
+            # 翌月1日の1日前を算出して末日とする
+            next_month = today.replace(day=28) + timedelta(days=4)
+            end_date = next_month.replace(day=1) - timedelta(days=1)
+        elif "月" in selected_period:
+            try:
+                m_num = int(selected_period.replace("月", ""))
+                start_date = date(target_year, m_num, 1)
+                if m_num == 12:
+                    end_date = date(target_year, 12, 31)
+                else:
+                    end_date = date(target_year, m_num + 1, 1) - timedelta(days=1)
+            except Exception as e:
+                start_date, end_date = today, today
+        elif selected_period == "カスタム":
+            show_custom_picker = True
+            min_d = available_dates[0] if available_dates else today
+            max_d = available_dates[-1] if available_dates else today
+            
+            # カスタムが選ばれた時のみ、この下にカレンダー入力を表示するためのフラグ
+            with st.container():
+                custom_range = st.date_input("細かく日程を指定", value=(min_d, max_d), min_value=min_d, max_value=max_d, key="pitch_view_d")
+                if isinstance(custom_range, tuple) and len(custom_range) == 2:
+                    start_date, end_date = custom_range
+                elif isinstance(custom_range, date):
+                    start_date, end_date = custom_range, custom_range
+
         with sel_c3:
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"], key="pitch_view_type")
         with sel_c4:
             source_filter = st.selectbox("データ元フィルター", ["両方（すべて表示）", "Trackmanのみ", "Rapsodoのみ"], key="pitch_view_source")
         
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            start_date, end_date = date_range
+        # フィルタリングの実行
+        if start_date and end_date:
             df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
             if view_type == "ブルペンのみ":
@@ -304,7 +351,6 @@ with tab1:
                 st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
 
-                # 💡 【バグ対策】グラフホバー時に利用するリストを動的に構築
                 hover_items = ['Data Type', c_vel]
                 if 'Data Source' in df.columns:
                     hover_items.append('Data Source')
