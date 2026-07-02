@@ -173,9 +173,13 @@ with tab2:
 
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
-                            modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
-                                                      (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
-                                                      (latest_db['Data Type'] == data_type))]
+                            # 💡 【バグ修正】条件全体の判定の優先順位を明確な括弧で囲み、他人のデータが消えないよう修正
+                            target_condition = (
+                                (latest_db['Player Name'] == target_player) & 
+                                (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                                (latest_db['Data Type'] == data_type)
+                            )
+                            modified_db = latest_db[~target_condition]
                             updated_db = pd.concat([modified_db, new_df], ignore_index=True)
                         else:
                             updated_db = new_df
@@ -202,9 +206,11 @@ with tab2:
                     if latest_db.empty:
                         st.error("❌ データベースにデータが存在しないか、読み込めないため削除できません。")
                     else:
-                        target_condition = ((latest_db['Player Name'] == target_player) & 
-                                            (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
-                                            (latest_db['Data Type'] == data_type))
+                        target_condition = (
+                            (latest_db['Player Name'] == target_player) & 
+                            (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                            (latest_db['Data Type'] == data_type)
+                        )
                         match_count = len(latest_db[target_condition])
                         
                         if match_count == 0:
@@ -259,18 +265,16 @@ with tab1:
             min_data_date = today
             max_data_date = today
 
-        # 💡 一番上に「全体」を追加したリストを定義
         period_options = ["全体", "今日", "今週", "今月"]
         for m in range(1, 12 + 1):
             period_options.append(f"{m}月")
         period_options.append("カスタム")
         
         with sel_c2:
-            selected_period = st.selectbox("分析対象の期間", period_options, index=0, key="pitch_period_select") # デフォルトは「全体」に設定
+            selected_period = st.selectbox("分析対象の期間", period_options, index=0, key="pitch_period_select")
         
         start_date, end_date = None, None
         
-        # 💡 各選択肢に応じた日付範囲の計算ロジック
         if selected_period == "全体":
             start_date, end_date = min_data_date, max_data_date
         elif selected_period == "今日":
