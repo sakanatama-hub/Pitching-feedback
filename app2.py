@@ -239,7 +239,6 @@ with tab1:
 
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
-        # 💡 レイアウト：4つの操作カラム
         sel_c1, sel_c2, sel_c3, sel_c4 = st.columns(4)
         with sel_c1:
             p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
@@ -247,37 +246,40 @@ with tab1:
         df_player = df_all[df_all['Player Name'] == p_name].copy()
         df_player['Date'] = pd.to_datetime(df_player['Date']).dt.date
         
-        # 💡 期間の選択肢を動的に設定
         today = date.today()
         current_year = today.year
         
-        # データベースからこの選手が持っている最新のデータの年を基準にする（未来日付の対策）
         available_dates = sorted(df_player['Date'].unique())
         if available_dates:
             target_year = available_dates[-1].year
+            min_data_date = available_dates[0]
+            max_data_date = available_dates[-1]
         else:
             target_year = current_year
+            min_data_date = today
+            max_data_date = today
 
-        period_options = ["今日", "今週", "今月"]
+        # 💡 一番上に「全体」を追加したリストを定義
+        period_options = ["全体", "今日", "今週", "今月"]
         for m in range(1, 12 + 1):
             period_options.append(f"{m}月")
         period_options.append("カスタム")
         
         with sel_c2:
-            selected_period = st.selectbox("分析対象の期間", period_options, index=2, key="pitch_period_select") # デフォルトは今月
+            selected_period = st.selectbox("分析対象の期間", period_options, index=0, key="pitch_period_select") # デフォルトは「全体」に設定
         
-        # 💡 選択した期間に応じて自動で開始日と終了日を計算
         start_date, end_date = None, None
-        show_custom_picker = False
         
-        if selected_period == "今日":
+        # 💡 各選択肢に応じた日付範囲の計算ロジック
+        if selected_period == "全体":
+            start_date, end_date = min_data_date, max_data_date
+        elif selected_period == "今日":
             start_date, end_date = today, today
         elif selected_period == "今週":
             start_date = today - timedelta(days=6)
             end_date = today
         elif selected_period == "今月":
             start_date = today.replace(day=1)
-            # 翌月1日の1日前を算出して末日とする
             next_month = today.replace(day=28) + timedelta(days=4)
             end_date = next_month.replace(day=1) - timedelta(days=1)
         elif "月" in selected_period:
@@ -289,15 +291,10 @@ with tab1:
                 else:
                     end_date = date(target_year, m_num + 1, 1) - timedelta(days=1)
             except Exception as e:
-                start_date, end_date = today, today
+                start_date, end_date = min_data_date, max_data_date
         elif selected_period == "カスタム":
-            show_custom_picker = True
-            min_d = available_dates[0] if available_dates else today
-            max_d = available_dates[-1] if available_dates else today
-            
-            # カスタムが選ばれた時のみ、この下にカレンダー入力を表示するためのフラグ
             with st.container():
-                custom_range = st.date_input("細かく日程を指定", value=(min_d, max_d), min_value=min_d, max_value=max_d, key="pitch_view_d")
+                custom_range = st.date_input("細かく日程を指定", value=(min_data_date, max_data_date), min_value=min_data_date, max_value=max_data_date, key="pitch_view_d")
                 if isinstance(custom_range, tuple) and len(custom_range) == 2:
                     start_date, end_date = custom_range
                 elif isinstance(custom_range, date):
@@ -308,7 +305,6 @@ with tab1:
         with sel_c4:
             source_filter = st.selectbox("データ元フィルター", ["両方（すべて表示）", "Trackmanのみ", "Rapsodoのみ"], key="pitch_view_source")
         
-        # フィルタリングの実行
         if start_date and end_date:
             df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
