@@ -117,72 +117,121 @@ def time_to_degrees(time_str):
         return 0.0
 
 # --- タブ構造の定義 ---
-tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録"])
+tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
 
 # ==========================================
-# タブ2：投手データ登録
+# タブ2：投手データ登録・削除
 # ==========================================
 with tab2:
-    st.header("📝 投手データ登録")
+    st.header("📝 投手データ管理（登録・削除）")
     
+    # 共通の設定項目
     col_reg1, col_reg2, col_reg3 = st.columns(3)
     with col_reg1:
-        target_player = st.selectbox("登録する選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
+        target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
     with col_reg2:
-        target_date = st.date_input("投球日を選択", date.today(), key="pitch_reg_d")
+        target_date = st.date_input("対象の日付を選択", date.today(), key="pitch_reg_d")
     with col_reg3:
         data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
     
-    uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
+    st.divider()
+    
+    # アコーディオン（折りたたみ表示）で登録と削除を分ける
+    manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True)
+    
+    # --- データ登録モード ---
+    if "登録" in manage_mode:
+        st.subheader("📥 投球データのアップロード")
+        uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
 
-    if uploaded_file is not None:
-        if st.button("投球データをGitHubへ保存", key="btn_save_pitch"):
-            with st.spinner("データを処理してGitHubへ同期保存中..."):
+        if uploaded_file is not None:
+            if st.button("🚀 投球データをGitHubへ保存", key="btn_save_pitch", use_container_width=True):
+                with st.spinner("データを処理してGitHubへ同期保存中..."):
+                    try:
+                        file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
+                        if file_ext == '.csv':
+                            temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
+                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
+                            uploaded_file.seek(0)
+                            new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                        else:
+                            temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
+                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
+                            new_df = pd.read_excel(uploaded_file, skiprows=skip)
+
+                        # カラム変換とメタデータを追加
+                        new_df = new_df.rename(columns=COLUMN_MAP)
+                        new_df['Player Name'] = target_player
+                        new_df['Date'] = target_date.strftime('%Y-%m-%d')
+                        new_df['Data Type'] = data_type
+                        
+                        # 数値データのクレンジング
+                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
+                        for c in cols_to_num:
+                            if c in new_df.columns:
+                                new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
+
+                        # GitHubから現在の最新データを取得してマージ
+                        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+                        if not latest_db.empty:
+                            # 同一選手・同日・同区別のデータがあれば上書き対象として一旦除外
+                            modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
+                                                      (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                                                      (latest_db['Data Type'] == data_type))]
+                            updated_db = pd.concat([modified_db, new_df], ignore_index=True)
+                        else:
+                            updated_db = new_df
+
+                        # GitHubのストレージファイルを更新
+                        success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
+                        if success:
+                            st.session_state['pitch_df'] = updated_db  # セッション状態も最新化
+                            st.success(f"✅ {target_player} のデータを [{data_type}] としてGitHubへ保存しました！")
+                            st.balloons()
+                        else:
+                            st.error(f"❌ GitHubへの保存に失敗しました: {message}")
+                    except Exception as e:
+                        st.error(f"❌ 解析・保存エラー: {e}")
+
+    # --- データ削除モード ---
+    else:
+        st.subheader("🗑️ 登録済みデータの削除")
+        st.warning(f"現在、上の選択欄で「{target_player}」の「{target_date.strftime('%Y-%m-%d')}」における「{data_type}」が選択されています。")
+        
+        # 誤操作防止の2段階チェック
+        confirm_delete = st.checkbox("上記に間違いがなければ、ここにチェックを入れてください。")
+        
+        if st.button("🚨 選択したデータを完全に削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
+            with st.spinner("GitHub上のデータベースから削除中..."):
                 try:
-                    file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
-                    if file_ext == '.csv':
-                        temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
-                        skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
-                        uploaded_file.seek(0)
-                        new_df = pd.read_csv(uploaded_file, skiprows=skip)
-                    else:
-                        temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
-                        skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
-                        new_df = pd.read_excel(uploaded_file, skiprows=skip)
-
-                    # カラム変換とメタデータを追加
-                    new_df = new_df.rename(columns=COLUMN_MAP)
-                    new_df['Player Name'] = target_player
-                    new_df['Date'] = target_date.strftime('%Y-%m-%d')
-                    new_df['Data Type'] = data_type
-                    
-                    # 数値データのクレンジング
-                    cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
-                    for c in cols_to_num:
-                        if c in new_df.columns:
-                            new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
-
-                    # GitHubから現在の最新データを取得してマージ
+                    # 最新データの取得
                     latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
-                    if not latest_db.empty:
-                        # 同一選手・同日・同区別のデータがあれば上書き対象として一旦除外
-                        modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
-                                                  (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
-                                                  (latest_db['Data Type'] == data_type))]
-                        updated_db = pd.concat([modified_db, new_df], ignore_index=True)
+                    
+                    if latest_db.empty:
+                        st.error("❌ データベースにデータが存在しないか、読み込めないため削除できません。")
                     else:
-                        updated_db = new_df
-
-                    # GitHubのストレージファイルを更新
-                    success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
-                    if success:
-                        st.session_state['pitch_df'] = updated_db  # セッション状態も最新化
-                        st.success(f"✅ {target_player} のデータを [{data_type}] としてGitHubへ保存しました！")
-                        st.balloons()
-                    else:
-                        st.error(f"❌ GitHubへの保存に失敗しました: {message}")
+                        # 該当データがどれだけあるか確認
+                        target_condition = ((latest_db['Player Name'] == target_player) & 
+                                            (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                                            (latest_db['Data Type'] == data_type))
+                        
+                        match_count = len(latest_db[target_condition])
+                        
+                        if match_count == 0:
+                            st.info(f"ℹ️ 指定された条件（{target_player} / {target_date.strftime('%Y-%m-%d')} / {data_type}）に一致するデータは元々登録されていません。")
+                        else:
+                            # 該当データ「以外」を残すことで実質的な削除を実行
+                            updated_db = latest_db[~target_condition]
+                            
+                            # GitHubへ上書き保存
+                            success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
+                            if success:
+                                st.session_state['pitch_df'] = updated_db  # アプリの画面も更新
+                                st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータ（計 {match_count} 球分）を完全に削除しました。")
+                            else:
+                                st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
                 except Exception as e:
-                    st.error(f"❌ 解析・保存エラー: {e}")
+                    st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
 
 # ==========================================
 # タブ1：分析フィードバック
@@ -193,7 +242,7 @@ with tab1:
     df_all = st.session_state['pitch_df']
     
     if df_all.empty:
-        st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録」タブからアップロードしてください。")
+        st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録・削除」タブからアップロードしてください。")
     else:
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
