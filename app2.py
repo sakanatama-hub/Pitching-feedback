@@ -6,32 +6,68 @@ import plotly.express as px
 from datetime import date
 import re
 import os
-import pickle
+import io
+import requests  # GitHub API用に追加
 
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム (統合版)")
 
-# --- 2. データの永続化設定 ---
-DATA_FILE = "pitch_data_storage.pkl"
+# --- 2. GitHubデータ永続化の設定 ---
+# ※打撃アプリと同じ設定項目（Secrets等）を使用してください
+GITHUB_TOKEN = st.secrets.get("GITHUB_TOKEN", "")
+GITHUB_REPO = "sakanatama-hub/Batting-feedback"  # ご自身のユーザー名/リポジトリ名
+GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"   # 投球データの保存先パス（必要に応じて変更してください）
 
-def load_persistent_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "rb") as f:
-                return pickle.load(f)
-        except:
-            return {}
-    return {}
+def load_data_from_github(file_path):
+    """GitHubからExcelファイルを読み込む関数"""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        content = res.json()
+        download_url = content["download_url"]
+        file_res = requests.get(download_url)
+        # ExcelファイルをDataFrameとして読み込み
+        return pd.read_excel(io.BytesIO(file_res.content))
+    else:
+        # ファイルが存在しない場合は空のDataFrameを返す
+        return pd.DataFrame()
 
-def save_persistent_data(data):
-    try:
-        with open(DATA_FILE, "wb") as f:
-            pickle.dump(data, f)
-    except Exception as e:
-        st.error(f"データの保存に失敗しました: {e}")
+def save_to_github(df, file_path):
+    """DataFrameをExcelにしてGitHubへプッシュ・保存する関数"""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    
+    # Excelデータに変換
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    excel_data = output.getvalue()
+    
+    import base64
+    content_b64 = base64.b64encode(excel_data).decode("utf-8")
+    
+    # 既存ファイルのSHAを取得（上書きに必要）
+    res = requests.get(url, headers=headers)
+    sha = res.json().get("sha") if res.status_code == 200 else None
+    
+    payload = {
+        "message": "Update pitch data via Streamlit",
+        "content": content_b64
+    }
+    if sha:
+        payload["sha"] = sha
+        
+    put_res = requests.put(url, headers=headers, json=payload)
+    if put_res.status_code in [200, 201]:
+        return True, "成功"
+    else:
+        return False, put_res.json().get("message", "Unknown error")
 
-if 'stored_data' not in st.session_state:
-    st.session_state['stored_data'] = load_persistent_data()
+# --- アプリ起動時にGitHubから最新データを一括読込 ---
+if 'pitch_df' not in st.session_state:
+    with st.spinner("GitHubから最新の投球データを読み込み中..."):
+        st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
 
 # --- 3. 選手・カラー設定 ---
 PLAYER_HANDS = {
@@ -41,7 +77,6 @@ PLAYER_HANDS = {
     "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
 }
 
-# 球種ごとの指定色
 COLOR_MAP_PITCH = {
     "Straight": "red", "Fastball": "red", "ストレート": "red", "四縫線": "red", "4-Seam": "red",
     "Split": "blue", "Splitter": "blue", "スプリット": "blue",
@@ -52,19 +87,11 @@ COLOR_MAP_PITCH = {
     "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
 }
 
-# --- 4. カラム名マッピング ---
 COLUMN_MAP = {
-    'TaggedPitchType': 'Pitch Type',
-    'RelSpeed': 'Velocity',
-    'SpinRate': 'Spin Rate',
-    'Tilt': 'Spin Direction',
-    'InducedVertBreak': 'VB',
-    'HorzBreak': 'HB',
-    'SpinEfficiency': 'Spin Efficiency',
-    'True Spin (release)': 'Spin Rate',
-    'Spin Efficiency (release)': 'Spin Efficiency',
-    'VB (trajectory)': 'VB',
-    'HB (trajectory)': 'HB'
+    'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
+    'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
+    'SpinEfficiency': 'Spin Efficiency', 'True Spin (release)': 'Spin Rate',
+    'Spin Efficiency (release)': 'Spin Efficiency', 'VB (trajectory)': 'VB', 'HB (trajectory)': 'HB'
 }
 
 def time_to_degrees(time_str):
@@ -72,18 +99,17 @@ def time_to_degrees(time_str):
         match = re.match(r"(\d+):(\d+)", str(time_str))
         if not match: return 0.0
         hh, mm = map(int, match.groups())
-        total_minutes = (hh % 12) * 60 + mm
-        return total_minutes * 0.5
+        return ((hh % 12) * 60 + mm) * 0.5
     except:
         return 0.0
 
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 データ登録"])
 
 # ==========================================
-# タブ2：データ登録・削除
+# タブ2：データ登録（GitHub連動版）
 # ==========================================
 with tab2:
-    st.header("データ登録 (Rapsodo / Trackman対応)")
+    st.header("データ登録 (GitHub外部ストレージ同期)")
     col_reg1, col_reg2, col_reg3 = st.columns(3)
     with col_reg1:
         target_player = st.selectbox("選手を選択", list(PLAYER_HANDS.keys()), key="reg_p")
@@ -95,138 +121,94 @@ with tab2:
     uploaded_file = st.file_uploader("ファイルをアップロード (CSVまたはExcel)", type=['csv', 'xlsx', 'xls'])
 
     if uploaded_file is not None:
-        if st.button("データを登録・蓄積する"):
-            try:
-                file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
-                
-                if file_ext == '.csv':
-                    temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
-                    skip = 0
-                    for i, row in temp_df.iterrows():
-                        row_str = row.astype(str).values
-                        if any(k in s for s in row_str for k in ["PitchNo", "Pitcher", "TaggedPitchType"]):
-                            skip = i
-                            break
-                    uploaded_file.seek(0)
-                    new_df = pd.read_csv(uploaded_file, skiprows=skip)
-                else:
-                    temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
-                    skip = 0
-                    for i, row in temp_df.iterrows():
-                        row_str = row.astype(str).values
-                        if any(k in s for s in row_str for k in ["PitchNo", "Pitcher", "TaggedPitchType"]):
-                            skip = i
-                            break
-                    new_df = pd.read_excel(uploaded_file, skiprows=skip)
+        if st.button("投球データをGitHubへ保存"):
+            with st.spinner("データを処理してGitHubへ保存中..."):
+                try:
+                    file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
+                    if file_ext == '.csv':
+                        temp_df = pd.read_csv(uploaded_file, nrows=10, header=None)
+                        skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
+                        uploaded_file.seek(0)
+                        new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                    else:
+                        temp_df = pd.read_excel(uploaded_file, nrows=10, header=None)
+                        skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "TaggedPitchType"])), 0)
+                        new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
-                new_df = new_df.rename(columns=COLUMN_MAP)
-                new_df['Data Type'] = data_type
-                
-                cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
-                for c in cols_to_num:
-                    if c in new_df.columns:
-                        new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
+                    # カラム変換と基本データの付与
+                    new_df = new_df.rename(columns=COLUMN_MAP)
+                    new_df['Player Name'] = target_player
+                    new_df['Date'] = target_date.strftime('%Y-%m-%d')
+                    new_df['Data Type'] = data_type
+                    
+                    # 数値型へのクリーニング
+                    cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
+                    for c in cols_to_num:
+                        if c in new_df.columns:
+                            new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-                if target_player not in st.session_state['stored_data']:
-                    st.session_state['stored_data'][target_player] = {}
-                
-                date_key = str(target_date)
-                if date_key in st.session_state['stored_data'][target_player]:
-                    existing = st.session_state['stored_data'][target_player][date_key]
-                    if 'Data Type' not in existing.columns:
-                        existing['Data Type'] = 'ブルペン'
-                        
-                    new_df = pd.concat([existing, new_df], ignore_index=True).drop_duplicates()
-                
-                st.session_state['stored_data'][target_player][date_key] = new_df
-                save_persistent_data(st.session_state['stored_data'])
-                st.success(f"{target_player} のデータを [{data_type}] として保存しました。")
-                st.balloons()
-            except Exception as e:
-                st.error(f"読み込みエラー: {e}")
+                    # GitHubから最新のデータベースを取得して結合
+                    latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+                    if not latest_db.empty:
+                        # 既存の同一選手・同一日・同一区別のデータがあれば重複を避けるため一度消して上書き合流
+                        modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
+                                                  (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                                                  (latest_db['Data Type'] == data_type))]
+                        updated_db = pd.concat([modified_db, new_df], ignore_index=True)
+                    else:
+                        updated_db = new_df
 
-    # ---- 削除機能セクション ----
-    st.divider()
-    st.subheader("🗑️ 登録データの削除")
-    
-    if st.session_state['stored_data']:
-        del_player = st.selectbox("データ削除する選手を選択", sorted(st.session_state['stored_data'].keys()), key="del_p")
-        
-        if del_player in st.session_state['stored_data'] and st.session_state['stored_data'][del_player]:
-            available_del_dates = sorted(st.session_state['stored_data'][del_player].keys(), reverse=True)
-            del_mode = st.radio("削除モード", ["選択した日付のデータを削除", "この選手の全データを削除"])
-            
-            if del_mode == "選択した日付のデータを削除":
-                del_date = st.selectbox("削除する日付を選択", available_del_dates, key="del_d")
-                if st.button(f"🚨 {del_player} の {del_date} のデータを削除する"):
-                    del st.session_state['stored_data'][del_player][del_date]
-                    if not st.session_state['stored_data'][del_player]:
-                        del st.session_state['stored_data'][del_player]
-                    save_persistent_data(st.session_state['stored_data'])
-                    st.success(f"{del_player} の {del_date} のデータを削除しました。")
-                    st.rerun()
-            
-            elif del_mode == "この選手の全データを削除":
-                st.warning("これまでの全ての測定データが完全に削除されます。")
-                if st.button(f"💥 {del_player} の全データを完全に削除する"):
-                    del st.session_state['stored_data'][del_player]
-                    save_persistent_data(st.session_state['stored_data'])
-                    st.success(f"{del_player} の全データを削除しました。")
-                    st.rerun()
-        else:
-            st.info("選択された選手の登録データはありません。")
-    else:
-        st.info("システム内に登録されているデータがありません。")
+                    # GitHubへプッシュ
+                    success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
+                    if success:
+                        st.session_state['pitch_df'] = updated_db  # アプリ内の表示データも更新
+                        st.success(f"✅ {target_player} のデータを [{data_type}] としてGitHubに同期保存しました！")
+                        st.balloons()
+                    else:
+                        st.error(f"❌ GitHubへの保存に失敗しました: {message}")
+                except Exception as e:
+                    st.error(f"❌ 読み込みエラー: {e}")
 
 # ==========================================
-# タブ1：分析フィードバック
+# タブ1：分析フィードバック（GitHubデータ読込版）
 # ==========================================
 with tab1:
     st.header("投球解析フィードバック")
     
-    if not st.session_state['stored_data']:
-        st.info("データが登録されていません。「データ登録」タブからアップロードしてください。")
+    df_all = st.session_state['pitch_df']
+    
+    if df_all.empty:
+        st.info("データが登録されていないか、GitHub上のデータファイルが空です。")
     else:
+        # 登録されているユニークな選手一覧を抽出
+        available_players = sorted(df_all['Player Name'].dropna().unique())
+        
         sel_c1, sel_c2, sel_c3 = st.columns(3)
         with sel_c1:
-            p_name = st.selectbox("分析する選手", sorted(st.session_state['stored_data'].keys()))
+            p_name = st.selectbox("分析する選手", available_players)
         
-        available_dates = sorted(st.session_state['stored_data'][p_name].keys())
-        min_date = date.fromisoformat(available_dates[0]) if available_dates else date.today()
-        max_date = date.fromisoformat(available_dates[-1]) if available_dates else date.today()
+        # 選択された選手のデータのみにフィルタリング
+        df_player = df_all[df_all['Player Name'] == p_name].copy()
+        
+        # 日付範囲の設定
+        df_player['Date'] = pd.to_datetime(df_player['Date']).dt.date
+        available_dates = sorted(df_player['Date'].unique())
+        min_date = available_dates[0] if available_dates else date.today()
+        max_date = available_dates[-1] if available_dates else date.today()
         
         with sel_c2:
-            date_range = st.date_input(
-                "分析対象の期間を選択",
-                value=(min_date, max_date),
-                min_value=min_date,
-                max_value=max_date
-            )
-            
+            date_range = st.date_input("分析対象の期間を選択", value=(min_date, max_date), min_value=min_date, max_value=max_date)
         with sel_c3:
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"])
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
+            df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
-            matched_dfs = []
-            for d_str, d_df in st.session_state['stored_data'][p_name].items():
-                cur_d = date.fromisoformat(d_str)
-                if start_date <= cur_d <= end_date:
-                    matched_dfs.append(d_df)
-            
-            if not matched_dfs:
-                st.warning("選択された期間内にデータが存在しません。")
-                df = pd.DataFrame()
-            else:
-                df = pd.concat(matched_dfs, ignore_index=True).copy()
-                if 'Data Type' not in df.columns:
-                    df['Data Type'] = 'ブルペン'
-                
-                if view_type == "ブルペンのみ":
-                    df = df[df['Data Type'] == "ブルペン"]
-                elif view_type == "シートBTのみ":
-                    df = df[df['Data Type'] == "シートBT"]
+            if view_type == "ブルペンのみ":
+                df = df[df['Data Type'] == "ブルペン"]
+            elif view_type == "シートBTのみ":
+                df = df[df['Data Type'] == "シートBT"]
         else:
             df = pd.DataFrame()
 
@@ -238,72 +220,45 @@ with tab1:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
                 
                 agg_dict = {}
-                if c_vel in df.columns:
-                    agg_dict[c_vel] = ['mean', 'max']
-                if c_rev in df.columns:
-                    agg_dict[c_rev] = 'mean'
-                if c_eff in df.columns:
-                    agg_dict[c_eff] = 'mean'
-                if c_vb in df.columns:
-                    agg_dict[c_vb] = 'mean'
-                if c_hb in df.columns:
-                    agg_dict[c_hb] = 'mean'
+                for c in [c_vel, c_rev, c_eff, c_vb, c_hb]:
+                    if c in df.columns:
+                        agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
                 stats_df = df.groupby('Pitch Type').agg(agg_dict).reset_index()
                 stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
                 rename_dict = {
-                    f"{c_vel}_mean": "平均球速",
-                    f"{c_vel}_max": "最高球速",
-                    f"{c_rev}_mean": "平均回転数",
-                    f"{c_eff}_mean": "回転効率 (%)",
-                    f"{c_vb}_mean": "縦変化量 (VB)",
-                    f"{c_hb}_mean": "横変化量 (HB)"
+                    f"{c_vel}_mean": "平均球速", f"{c_vel}_max": "最高球速",
+                    f"{c_rev}_mean": "平均回転数", f"{c_eff}_mean": "回転効率 (%)",
+                    f"{c_vb}_mean": "縦変化量 (VB)", f"{c_hb}_mean": "横変化量 (HB)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
 
                 st.divider()
-                st.subheader("📈 変化量マップ (全投球 vs 球種別平均)")
+                st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
 
                 with plot_col1:
                     st.write("▼ 全投球プロット")
-                    fig_all = px.scatter(
-                        df, x=c_hb, y=c_vb, color='Pitch Type',
-                        range_x=[-60, 60], range_y=[-60, 60],
-                        color_discrete_map=COLOR_MAP_PITCH,
-                        hover_data=['Data Type', c_vel]
-                    )
+                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=['Data Type', c_vel])
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
-                    fig_all.update_layout(
-                        plot_bgcolor='white', width=550, height=550,
-                        yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
-                        xaxis=dict(gridcolor='lightgray')
-                    )
+                    fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_all, use_container_width=False)
 
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
                     plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
-                    
-                    fig_avg = px.scatter(
-                        stats_df, x=plot_x, y=plot_y, color='Pitch Type',
-                        text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60],
-                        color_discrete_map=COLOR_MAP_PITCH
-                    )
+                    fig_avg = px.scatter(stats_df, x=plot_x, y=plot_y, color='Pitch Type', text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
                     fig_avg.update_traces(marker=dict(size=15), textposition='top center')
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
-                    fig_avg.update_layout(
-                        plot_bgcolor='white', width=550, height=550,
-                        yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'),
-                        xaxis=dict(gridcolor='lightgray')
-                    )
+                    fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
+                # --- 3Dスピンビジュアライザー（正面配置） ---
                 st.divider()
                 st.subheader("⚾️ 3Dスピンビジュアライザー")
                 valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
@@ -319,33 +274,26 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
-                    # 基本シーム（縫い目）形状の生成
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
-                    # 【修正】初期段階で完全に正面（Z-X平面、視点に正対）を向くように配列の軸割当てを整理
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
                     base_pts = np.vstack([sx, sz, sy]).T 
 
-                    # 12時方向（上）を基準に時計回りに回転方向を設定
                     tilt_rad = np.deg2rad(tilt_deg)
                     cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
                     rot_y = np.array([[cos_t, 0, -sin_t], [0, 1, 0], [sin_t, 0, cos_t]])
 
-                    # ジャイロ成分の反映
                     gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-                    cos_g, sin_g = Math_cos, Math_sin = np.cos(gyro_rad), np.sin(gyro_rad)
+                    cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
                     g_sign = -1 if hand == "右" else 1
                     rot_gyro = np.array([[1, 0, 0], [0, cos_g, g_sign*sin_g], [0, -g_sign*sin_g, cos_g]])
 
                     combined_rot = rot_y @ rot_gyro
                     axis = combined_rot @ np.array([0.0, 0.0, 1.0])
-                    
                     tilted_pts = (base_pts @ combined_rot.T)
                     seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
 
-                    multiplier = 1
-                    if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]):
-                        multiplier = -1
+                    multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
                     html_code = f"""
                     <div id="ball_canvas" style="width:100%; height:600px;"></div>
@@ -384,11 +332,7 @@ with tab1:
                         ];
 
                         var layout = {{
-                            scene: {{ 
-                                xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}},
-                                aspectmode: 'cube', 
-                                camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} // 【修正】完全に真正面から見据えるカメラ配置
-                            }},
+                            scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} }},
                             margin: {{l:0, r:0, b:0, t:0}}
                         }};
 
@@ -410,4 +354,4 @@ with tab1:
                     """
                     st.components.v1.html(html_code, height=600)
         else:
-            st.warning("選択した条件（期間・練習種別）に一致するデータがありません。")
+            st.warning("選択した条件に一致するデータがありません。")
