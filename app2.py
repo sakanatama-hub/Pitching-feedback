@@ -9,9 +9,47 @@ import os
 import io
 import requests
 import time  # 💡 同期待ちリトライ用
+import base64
 
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム")
+
+# ==========================================
+# 🔒 簡易パスワード認証システム
+# ==========================================
+def check_password():
+    """パスワードが正しいかチェックし、セッション状態を更新する"""
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    # すでに認証済みの場合はTrueを返す
+    if st.session_state["authenticated"]:
+        return True
+
+    # 認証画面の表示
+    st.title("🔒 投球解析システム - ログイン")
+    
+    with st.form("login_form"):
+        password_input = st.text_input("パスワードを入力してください", type="password")
+        submit_button = st.form_submit_with_submit_button("ログイン")
+        
+        if submit_button:
+            if password_input == "1189":
+                st.session_state["authenticated"] = True
+                st.rerun()  # 画面を再描画してメインコンテンツへ
+            else:
+                st.error("❌ パスワードが間違っています。")
+                
+    return False
+
+# パスワードチェックが通らない場合は、ここでアプリの実行をストップさせる
+if not check_password():
+    st.stop()
+
+
+# ==========================================
+# 🚀 以下、認証成功時のみ実行されるメインロジック
+# ==========================================
 
 # --- 2. トークン・リポジトリ設定（ピッチング専用に完全独立） ---
 GITHUB_TOKEN = (
@@ -53,14 +91,11 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    # 登録しようとしている新しいデータ行を特定（Player Name, Date, Data Typeが新データ）
-    # ※リトライ時に他人の最新データを消さないための目印
     new_player = df_to_save.iloc[-1]['Player Name'] if not df_to_save.empty else ""
     new_date = df_to_save.iloc[-1]['Date'] if not df_to_save.empty else ""
     new_type = df_to_save.iloc[-1]['Data Type'] if not df_to_save.empty else ""
 
     for attempt in range(max_retries):
-        # 1. 最新のSHA（バージョンキー）と現在のファイル内容をGitHubから再取得
         res = requests.get(url, headers=headers)
         sha = None
         current_db = pd.DataFrame()
@@ -72,7 +107,6 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
             file_res = requests.get(download_url)
             current_db = pd.read_excel(io.BytesIO(file_res.content))
             
-        # 2. 最新のファイルに対して、今回の新規データを正しくマージし直す
         if not current_db.empty:
             target_condition = (
                 (current_db['Player Name'] == new_player) & 
@@ -81,7 +115,6 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
             )
             modified_db = current_db[~target_condition]
             
-            # 今回アップロードしようとしている純粋な新しいデータのみを抽出して結合
             just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
                                        (df_to_save['Date'] == new_date) & 
                                        (df_to_save['Data Type'] == new_type)]
@@ -89,13 +122,11 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
         else:
             final_df = df_to_save
 
-        # 3. Excelバイナリに変換
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             final_df.to_excel(writer, index=False)
         excel_data = output.getvalue()
         
-        import base64
         content_b64 = base64.b64encode(excel_data).decode("utf-8")
         
         payload = {
@@ -105,17 +136,14 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
         if sha:
             payload["sha"] = sha
             
-        # 4. アップロードを試みる
         put_res = requests.put(url, headers=headers, json=payload)
         
         if put_res.status_code in [200, 201]:
-            # 成功したらセッション状態を最新の最終結合データで更新して終了
             st.session_state['pitch_df'] = final_df
             return True, "成功"
         
-        # 409 Conflict（衝突）などの場合は少し待って自動リトライ
         if attempt < max_retries - 1:
-            time.sleep(1.5)  # 1.5秒待機して再挑戦
+            time.sleep(1.5)
         else:
             return False, put_res.json().get("message", "連続送信によるコンフリクトが解決できませんでした。")
 
@@ -142,7 +170,6 @@ COLOR_MAP_PITCH = {
     "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
 }
 
-# カラム名統一用のマップ
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
@@ -204,6 +231,7 @@ with tab2:
                         else:
                             temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            uploaded_file.seek(0)
                             new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
                         new_df = new_df.rename(columns=COLUMN_MAP)
@@ -229,7 +257,6 @@ with tab2:
                         else:
                             updated_db = new_df
 
-                        # 💡 リトライ対応版の関数を呼び出し
                         success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
                         if success:
                             st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
@@ -262,7 +289,6 @@ with tab2:
                             st.info(f"ℹ️ 指定された条件に一致するデータは登録されていません。")
                         else:
                             updated_db = latest_db[~target_condition]
-                            # 削除時も念のためリトライ対応
                             success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
                             if success:
                                 st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
@@ -446,7 +472,7 @@ with tab1:
 
                     gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
                     cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
-                    g_sign = -1 if hand == "右" else 1
+                    g_sign = -1 if hand == "right" or hand == "右" else 1
                     rot_gyro = np.array([[1, 0, 0], [0, cos_g, g_sign*sin_g], [0, -g_sign*sin_g, cos_g]])
 
                     combined_rot = rot_y @ rot_gyro
@@ -495,7 +521,7 @@ with tab1:
                         var layout = {{
                             scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} }},
                             margin: {{l:0, r:0, b:0, t:0}}
-                        }};
+                        ];
 
                         Plotly.newPlot('ball_canvas', data, layout);
 
