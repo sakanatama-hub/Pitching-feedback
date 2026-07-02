@@ -8,6 +8,7 @@ import re
 import os
 import io
 import requests
+import time  # 💡 同期待ちリトライ用
 
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム")
@@ -41,37 +42,82 @@ def load_data_from_github(file_path):
     else:
         return pd.DataFrame()
 
-def save_to_github(df, file_path):
-    """投球データをExcel化してGitHubへ保存・上書きする"""
+def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
+    """
+    💡 【コンフリクト徹底対策】
+    連続投稿で上書き衝突が起きた場合、最新データを再取得して自動マージ＆リトライする関数
+    """
     if not GITHUB_TOKEN:
         return False, "Secretsにトークンが設定されていません。"
         
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
-    excel_data = output.getvalue()
-    
-    import base64
-    content_b64 = base64.b64encode(excel_data).decode("utf-8")
-    
-    res = requests.get(url, headers=headers)
-    sha = res.json().get("sha") if res.status_code == 200 else None
-    
-    payload = {
-        "message": "Update pitch data via Pitch Feedback App",
-        "content": content_b64
-    }
-    if sha:
-        payload["sha"] = sha
+    # 登録しようとしている新しいデータ行を特定（Player Name, Date, Data Typeが新データ）
+    # ※リトライ時に他人の最新データを消さないための目印
+    new_player = df_to_save.iloc[-1]['Player Name'] if not df_to_save.empty else ""
+    new_date = df_to_save.iloc[-1]['Date'] if not df_to_save.empty else ""
+    new_type = df_to_save.iloc[-1]['Data Type'] if not df_to_save.empty else ""
+
+    for attempt in range(max_retries):
+        # 1. 最新のSHA（バージョンキー）と現在のファイル内容をGitHubから再取得
+        res = requests.get(url, headers=headers)
+        sha = None
+        current_db = pd.DataFrame()
         
-    put_res = requests.put(url, headers=headers, json=payload)
-    if put_res.status_code in [200, 201]:
-        return True, "成功"
-    else:
-        return False, put_res.json().get("message", "Unknown error")
+        if res.status_code == 200:
+            file_info = res.json()
+            sha = file_info.get("sha")
+            download_url = file_info["download_url"]
+            file_res = requests.get(download_url)
+            current_db = pd.read_excel(io.BytesIO(file_res.content))
+            
+        # 2. 最新のファイルに対して、今回の新規データを正しくマージし直す
+        if not current_db.empty:
+            target_condition = (
+                (current_db['Player Name'] == new_player) & 
+                (current_db['Date'] == new_date) & 
+                (current_db['Data Type'] == new_type)
+            )
+            modified_db = current_db[~target_condition]
+            
+            # 今回アップロードしようとしている純粋な新しいデータのみを抽出して結合
+            just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
+                                       (df_to_save['Date'] == new_date) & 
+                                       (df_to_save['Data Type'] == new_type)]
+            final_df = pd.concat([modified_db, just_new_data], ignore_index=True)
+        else:
+            final_df = df_to_save
+
+        # 3. Excelバイナリに変換
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            final_df.to_excel(writer, index=False)
+        excel_data = output.getvalue()
+        
+        import base64
+        content_b64 = base64.b64encode(excel_data).decode("utf-8")
+        
+        payload = {
+            "message": f"Update pitch data (Attempt {attempt + 1})",
+            "content": content_b64
+        }
+        if sha:
+            payload["sha"] = sha
+            
+        # 4. アップロードを試みる
+        put_res = requests.put(url, headers=headers, json=payload)
+        
+        if put_res.status_code in [200, 201]:
+            # 成功したらセッション状態を最新の最終結合データで更新して終了
+            st.session_state['pitch_df'] = final_df
+            return True, "成功"
+        
+        # 409 Conflict（衝突）などの場合は少し待って自動リトライ
+        if attempt < max_retries - 1:
+            time.sleep(1.5)  # 1.5秒待機して再挑戦
+        else:
+            return False, put_res.json().get("message", "連続送信によるコンフリクトが解決できませんでした。")
 
 # --- アプリ起動時：GitHubから最新の投球データベースを読み込み ---
 if 'pitch_df' not in st.session_state:
@@ -173,7 +219,6 @@ with tab2:
 
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
-                            # 💡 【バグ修正】条件全体の判定の優先順位を明確な括弧で囲み、他人のデータが消えないよう修正
                             target_condition = (
                                 (latest_db['Player Name'] == target_player) & 
                                 (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
@@ -184,9 +229,9 @@ with tab2:
                         else:
                             updated_db = new_df
 
-                        success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
+                        # 💡 リトライ対応版の関数を呼び出し
+                        success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
                         if success:
-                            st.session_state['pitch_df'] = updated_db
                             st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
                             st.balloons()
                         else:
@@ -217,9 +262,9 @@ with tab2:
                             st.info(f"ℹ️ 指定された条件に一致するデータは登録されていません。")
                         else:
                             updated_db = latest_db[~target_condition]
-                            success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
+                            # 削除時も念のためリトライ対応
+                            success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
                             if success:
-                                st.session_state['pitch_df'] = updated_db
                                 st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
                             else:
                                 st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
