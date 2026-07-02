@@ -12,16 +12,23 @@ import requests
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム")
 
-# --- 2. 投球アプリ専用：GitHubデータ永続化設定 ---
-# Secretsから指定されたトークン名、または汎用トークンを自動探索
-GITHUB_TOKEN = st.secrets.get("Pitching-feedback") or st.secrets.get("GITHUB_TOKEN") or st.secrets.get("PITCH_GITHUB_TOKEN", "")
-GITHUB_REPO = "sakanatama-hub/Batting-feedback"  # ユーザー名 / リポジトリ名
+# --- 2. トークンの多重自動探索ロジック ---
+# Secretsから様々な候補（アンダーバー版、大文字・小文字、標準環境変数など）を自動で探します
+GITHUB_TOKEN = (
+    st.secrets.get("PITCHING_FEEDBACK") or 
+    st.secrets.get("pitching_feedback") or 
+    st.secrets.get("GITHUB_TOKEN") or 
+    st.secrets.get("github_token") or
+    os.environ.get("GITHUB_TOKEN", "")
+)
+
+GITHUB_REPO = "sakanatama-hub/Batting-feedback"  # 保存先リポジトリ名
 GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"  # リポジトリ内の保存先パス
 
 def load_data_from_github(file_path):
     """GitHubから投球データのExcelファイルを読み込む"""
     if not GITHUB_TOKEN:
-        st.error("StreamlitのSecretsにトークン（'Pitching-feedback'）が設定されていないため、GitHubからデータを読み込めません。")
+        st.error("【設定エラー】StreamlitのSecretsに 'PITCHING_FEEDBACK' が設定されていないか、読み込めていません。")
         return pd.DataFrame()
         
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -40,7 +47,7 @@ def load_data_from_github(file_path):
 def save_to_github(df, file_path):
     """投球データをExcel化してGitHubへ保存・上書きする"""
     if not GITHUB_TOKEN:
-        return False, "トークン（'Pitching-feedback'）が設定されていません。"
+        return False, "Secretsに 'PITCHING_FEEDBACK' が設定されていません。"
         
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
