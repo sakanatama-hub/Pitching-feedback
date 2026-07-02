@@ -31,7 +31,8 @@ def check_password():
     
     with st.form("login_form"):
         password_input = st.text_input("パスワードを入力してください", type="password")
-        submit_button = st.form_submit_with_submit_button("ログイン")
+        # 🛠️ 【修正箇所】正しいメソッド名 st.form_submit_button に修正
+        submit_button = st.form_submit_button("ログイン")
         
         if submit_button:
             if password_input == "1189":
