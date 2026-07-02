@@ -96,13 +96,11 @@ COLOR_MAP_PITCH = {
     "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
 }
 
-# 🛠️ トラックマンとラプソード、両方のカラムを統一するためのマップ
+# カラム名統一用のマップ
 COLUMN_MAP = {
-    # トラックマン
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
     'SpinEfficiency': 'Spin Efficiency',
-    # ラプソード
     'Total Spin': 'Spin Rate',
     'True Spin (release)': 'True Spin',
     'Spin Efficiency (release)': 'Spin Efficiency',
@@ -130,7 +128,6 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    # 共通の設定項目
     col_reg1, col_reg2, col_reg3 = st.columns(3)
     with col_reg1:
         target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
@@ -146,10 +143,7 @@ with tab2:
     # --- データ登録モード ---
     if "登録" in manage_mode:
         st.subheader("📥 投球データのアップロード")
-        
-        # 💡 トラックマンかラプソードか選ぶ設定を追加
         data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True)
-        
         uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
 
         if uploaded_file is not None:
@@ -158,7 +152,6 @@ with tab2:
                     try:
                         file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                         if file_ext == '.csv':
-                            # 行飛ばし判定（ヘッダーがあるところまで飛ばす）
                             temp_df = pd.read_csv(uploaded_file, nrows=15, header=None)
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
                             uploaded_file.seek(0)
@@ -168,23 +161,19 @@ with tab2:
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
                             new_df = pd.read_excel(uploaded_file, skiprows=skip)
 
-                        # カラム変換とメタデータを追加
                         new_df = new_df.rename(columns=COLUMN_MAP)
                         new_df['Player Name'] = target_player
                         new_df['Date'] = target_date.strftime('%Y-%m-%d')
                         new_df['Data Type'] = data_type
-                        new_df['Data Source'] = data_source  # 機器情報を記録
+                        new_df['Data Source'] = data_source  # 💡「Trackman（トラックマン）」か「Rapsodo（ラプソード）」を保存
                         
-                        # 数値データのクレンジングと単位変換（ラプソードのVB/HBは一般的にインチ。必要に応じてセンチへ自動変換するロジックも組み込めますが、今回はクレンジングのみ）
                         cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
                         for c in cols_to_num:
                             if c in new_df.columns:
                                 new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
 
-                        # GitHubから現在の最新データを取得してマージ
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
-                            # 同一選手・同日・同区別のデータがあれば上書き対象として一旦除外
                             modified_db = latest_db[~((latest_db['Player Name'] == target_player) & 
                                                       (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
                                                       (latest_db['Data Type'] == data_type))]
@@ -192,10 +181,9 @@ with tab2:
                         else:
                             updated_db = new_df
 
-                        # GitHubのストレージファイルを更新
                         success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
                         if success:
-                            st.session_state['pitch_df'] = updated_db  # セッション状態も最新化
+                            st.session_state['pitch_df'] = updated_db
                             st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
                             st.balloons()
                         else:
@@ -207,35 +195,33 @@ with tab2:
     else:
         st.subheader("🗑️ 登録済みデータの削除")
         st.warning(f"現在、上の選択欄で「{target_player}」の「{target_date.strftime('%Y-%m-%d')}」における「{data_type}」が選択されています。")
-        
         confirm_delete = st.checkbox("上記に間違いがなければ、ここにチェックを入れてください。")
         
         if st.button("🚨 選択したデータを完全に削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
             with st.spinner("GitHub上のデータベースから削除中..."):
                 try:
                     latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
-                    
                     if latest_db.empty:
                         st.error("❌ データベースにデータが存在しないか、読み込めないため削除できません。")
                     else:
                         target_condition = ((latest_db['Player Name'] == target_player) & 
                                             (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
                                             (latest_db['Data Type'] == data_type))
-                        
                         match_count = len(latest_db[target_condition])
                         
                         if match_count == 0:
-                            st.info(f"ℹ️ 指定された条件（{target_player} / {target_date.strftime('%Y-%m-%d')} / {data_type}）に一致するデータは元々登録されていません。")
+                            st.info(f"ℹ️ 指定された条件に一致するデータは登録されていません。")
                         else:
                             updated_db = latest_db[~target_condition]
                             success, message = save_to_github(updated_db, GITHUB_PITCH_FILE_PATH)
                             if success:
                                 st.session_state['pitch_df'] = updated_db
-                                st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータ（計 {match_count} 球分）を完全に削除しました。")
+                                st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
                             else:
                                 st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
                 except Exception as e:
                     st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
+
 
 # ==========================================
 # タブ1：分析フィードバック
@@ -250,7 +236,8 @@ with tab1:
     else:
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
-        sel_c1, sel_c2, sel_c3 = st.columns(3)
+        # 💡 レイアウトを調整し、4カラムにして「データ元（機器）フィルター」を追加
+        sel_c1, sel_c2, sel_c3, sel_c4 = st.columns(4)
         with sel_c1:
             p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
         
@@ -264,15 +251,26 @@ with tab1:
             date_range = st.date_input("分析対象の期間を選択", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="pitch_view_d")
         with sel_c3:
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"], key="pitch_view_type")
+        with sel_c4:
+            # 💡 ここでトラックマンとラプソードの出し分けを選択可能に
+            source_filter = st.selectbox("データ元フィルター", ["両方（すべて表示）", "Trackmanのみ", "Rapsodoのみ"], key="pitch_view_source")
         
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
             df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
+            # 練習種別でのフィルタリング
             if view_type == "ブルペンのみ":
                 df = df[df['Data Type'] == "ブルペン"]
             elif view_type == "シートBTのみ":
                 df = df[df['Data Type'] == "シートBT"]
+                
+            # 💡 データ元（機器）でのフィルタリング
+            if source_filter == "Trackmanのみ":
+                # 過去のデータで「Data Source」カラムが無いものはTrackmanとして扱う、または前後の文字で判定
+                df = df[df['Data Source'].astype(str).str.contains("Trackman")]
+            elif source_filter == "Rapsodoのみ":
+                df = df[df['Data Source'].astype(str).str.contains("Rapsodo")]
         else:
             df = pd.DataFrame()
 
@@ -281,7 +279,7 @@ with tab1:
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity'
 
             if 'Pitch Type' in df.columns:
-                st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type})")
+                st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
                 agg_dict = {}
                 for c in [c_vel, c_rev, c_eff, c_vb, c_hb]:
@@ -305,7 +303,8 @@ with tab1:
 
                 with plot_col1:
                     st.write("▼ 全投球プロット")
-                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=['Data Type', c_vel])
+                    # ホバー時にどちらの機器のデータか分かるように 'Data Source' も追加
+                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=['Data Type', 'Data Source', c_vel])
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
@@ -418,4 +417,4 @@ with tab1:
                     """
                     st.components.v1.html(html_code, height=600)
         else:
-            st.warning("選択した期間・条件に一致するデータがありません。")
+            st.warning("選択した期間・条件（練習種別、データ元など）に一致するデータがありません。")
