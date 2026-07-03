@@ -8,7 +8,7 @@ import re
 import os
 import io
 import requests
-import time
+import time  # 💡 同期待ちリトライ用
 import base64
 
 # --- 1. ページ設定 ---
@@ -18,74 +18,172 @@ st.set_page_config(layout="wide", page_title="投球解析システム")
 # 🔒 簡易パスワード認証システム
 # ==========================================
 def check_password():
+    """パスワードが正しいかチェックし、セッション状態を更新する"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
+
+    # すでに認証済みの場合はTrueを返す
     if st.session_state["authenticated"]:
         return True
+
+    # 認証画面の表示
     st.title("🔒 投球解析システム - ログイン")
+    
     with st.form("login_form"):
         password_input = st.text_input("パスワードを入力してください", type="password")
+        # 🛠️ 【修正箇所】正しいメソッド名 st.form_submit_button に修正
         submit_button = st.form_submit_button("ログイン")
+        
         if submit_button:
             if password_input == "1189":
                 st.session_state["authenticated"] = True
-                st.rerun()
+                st.rerun()  # 画面を再描画してメインコンテンツへ
             else:
                 st.error("❌ パスワードが間違っています。")
+                
     return False
 
+# パスワードチェックが通らない場合は、ここでアプリの実行をストップさせる
 if not check_password():
     st.stop()
 
-# --- 2. トークン・リポジトリ設定 ---
-GITHUB_TOKEN = st.secrets.get("PITCHING_FEEDBACK") or st.secrets.get("GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
-GITHUB_REPO = "sakanatama-hub/Pitching-feedback"
+
+# ==========================================
+# 🚀 以下、認証成功時のみ実行されるメインロジック
+# ==========================================
+
+# --- 2. トークン・リポジトリ設定（ピッチング専用に完全独立） ---
+GITHUB_TOKEN = (
+    st.secrets.get("PITCHING_FEEDBACK") or 
+    st.secrets.get("GITHUB_TOKEN") or 
+    os.environ.get("GITHUB_TOKEN", "")
+)
+
+# 💾 保存先をピッチング専用リポジトリに設定
+GITHUB_REPO = "sakanatama-hub/Pitching-feedback"  
 GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 def load_data_from_github(file_path):
+    """GitHubから投球データのExcelファイルを読み込む"""
     if not GITHUB_TOKEN:
+        st.error("【設定エラー】StreamlitのSecretsにトークンが設定されていないか、読み込めていません。")
         return pd.DataFrame()
+        
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     res = requests.get(url, headers=headers)
+    
     if res.status_code == 200:
-        download_url = res.json()["download_url"]
+        content = res.json()
+        download_url = content["download_url"]
         file_res = requests.get(download_url)
         return pd.read_excel(io.BytesIO(file_res.content))
-    return pd.DataFrame()
+        df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
+    else:
+        return pd.DataFrame()
 
 def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
-    if not GITHUB_TOKEN: return False, "Token missing"
+    """
+    💡 【コンフリクト徹底対策】
+    連続投稿で上書き衝突が起きた場合、最新データを再取得して自動マージ＆リトライする関数
+    """
+    if not GITHUB_TOKEN:
+        return False, "Secretsにトークンが設定されていません。"
+        
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
+    new_player = df_to_save.iloc[-1]['Player Name'] if not df_to_save.empty else ""
+    new_date = df_to_save.iloc[-1]['Date'] if not df_to_save.empty else ""
+    new_type = df_to_save.iloc[-1]['Data Type'] if not df_to_save.empty else ""
+
     for attempt in range(max_retries):
         res = requests.get(url, headers=headers)
-        sha = res.json().get("sha") if res.status_code == 200 else None
+        sha = None
+        current_db = pd.DataFrame()
         
+        if res.status_code == 200:
+            file_info = res.json()
+            sha = file_info.get("sha")
+            download_url = file_info["download_url"]
+            file_res = requests.get(download_url)
+            current_db = pd.read_excel(io.BytesIO(file_res.content))
+            
+        if not current_db.empty:
+            target_condition = (
+                (current_db['Player Name'] == new_player) & 
+                (current_db['Date'] == new_date) & 
+                (current_db['Data Type'] == new_type)
+            )
+            modified_db = current_db[~target_condition]
+            
+            just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
+                                       (df_to_save['Date'] == new_date) & 
+                                       (df_to_save['Data Type'] == new_type)]
+            final_df = pd.concat([modified_db, just_new_data], ignore_index=True)
+        else:
+            final_df = df_to_save
+
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_to_save.to_excel(writer, index=False)
-        content_b64 = base64.b64encode(output.getvalue()).decode("utf-8")
+            final_df.to_excel(writer, index=False)
+        excel_data = output.getvalue()
         
-        payload = {"message": "Update data", "content": content_b64}
-        if sha: payload["sha"] = sha
+        content_b64 = base64.b64encode(excel_data).decode("utf-8")
+        
+        payload = {
+            "message": f"Update pitch data (Attempt {attempt + 1})",
+            "content": content_b64
+        }
+        if sha:
+            payload["sha"] = sha
             
         put_res = requests.put(url, headers=headers, json=payload)
+        
         if put_res.status_code in [200, 201]:
-            st.session_state['pitch_df'] = df_to_save
+            st.session_state['pitch_df'] = final_df
             return True, "成功"
-        time.sleep(1.5)
-    return False, "保存失敗"
+        
+        if attempt < max_retries - 1:
+            time.sleep(1.5)
+        else:
+            return False, put_res.json().get("message", "連続送信によるコンフリクトが解決できませんでした。")
 
-# アプリ起動時のデータ読み込み
+# --- アプリ起動時：GitHubから最新の投球データベースを読み込み ---
 if 'pitch_df' not in st.session_state:
-    st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+    with st.spinner("GitHubから最新の投球データを読み込み中..."):
+        st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
 
-# --- 定数 ---
-PLAYER_HANDS = {"#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"}
-COLOR_MAP_PITCH = {"Straight": "red", "Split": "blue", "Changeup": "green", "Cutter": "orange", "Slider": "yellow", "Curve": "darkblue", "Sinker": "pink"}
-COLUMN_MAP = {'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate', 'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB'}
+# --- 3. 選手・カラー設定 ---
+PLAYER_HANDS = {
+    "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
+    "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
+    "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", 
+    "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
+}
+
+COLOR_MAP_PITCH = {
+    "Straight": "red", "Fastball": "red", "ストレート": "red", "四縫線": "red", "4-Seam": "red",
+    "Split": "blue", "Splitter": "blue", "スプリット": "blue",
+    "Changeup": "green", "CH": "green", "チェンジアップ": "green",
+    "Cutter": "orange", "Cut": "orange", "カット": "orange",
+    "Slider": "yellow", "SL": "yellow", "スライダー": "yellow",
+    "Curve": "darkblue", "Curveball": "darkblue", "CU": "darkblue", "カーブ": "darkblue",
+    "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
+}
+
+COLUMN_MAP = {
+    'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
+    'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
+    'SpinEfficiency': 'Spin Efficiency',
+    'Total Spin': 'Spin Rate',
+    'True Spin (release)': 'True Spin',
+    'Spin Efficiency (release)': 'Spin Efficiency',
+    'Spin Direction': 'Spin Direction',
+    'VB (trajectory)': 'VB',
+    'HB (trajectory)': 'HB',
+    'Velocity': 'Velocity'
+}
 
 def time_to_degrees(time_str):
     try:
@@ -93,51 +191,114 @@ def time_to_degrees(time_str):
         if not match: return 0.0
         hh, mm = map(int, match.groups())
         return ((hh % 12) * 60 + mm) * 0.5
-    except: return 0.0
+    except:
+        return 0.0
 
-# --- タブ構造 ---
+# --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
 
+# ==========================================
+# タブ2：投手データ登録・削除
+# ==========================================
 with tab2:
-    st.header("📝 投手データ管理")
-    manage_mode = st.radio("操作を選択", ["📥 新規登録", "🗑️ 削除"], horizontal=True)
+    st.header("📝 投手データ管理（登録・削除）")
     
-    if manage_mode == "📥 新規登録":
-        col1, col2, col3 = st.columns(3)
-        with col1: target_player = st.selectbox("選手", sorted(list(PLAYER_HANDS.keys())))
-        with col2: target_date = st.date_input("日付", date.today())
-        with col3: data_type = st.radio("練習種別", ["ブルペン", "シートBT"], horizontal=True)
-        data_source = st.radio("計測機器", ["Trackman", "Rapsodo"], horizontal=True)
-        uploaded_file = st.file_uploader("ファイルをアップロード", type=['csv', 'xlsx'])
-        
-        if uploaded_file and st.button("🚀 GitHubへ保存"):
-            # データ処理ロジック (省略: 元コードと同様にDataFrame作成)
-            # ... 
-            st.success("登録完了")
+    col_reg1, col_reg2, col_reg3 = st.columns(3)
+    with col_reg1:
+        target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
+    with col_reg2:
+        target_date = st.date_input("対象の日付を選択", date.today(), key="pitch_reg_d")
+    with col_reg3:
+        data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
+    
+    st.divider()
+    
+    manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True)
+    
+    if "登録" in manage_mode:
+        st.subheader("📥 投球データのアップロード")
+        data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True)
+        uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
 
-    else: # 削除モード
-        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
-        if latest_db.empty:
-            st.warning("データがありません")
-        else:
-            latest_db['Date'] = latest_db['Date'].astype(str)
-            options = latest_db[['Player Name', 'Date', 'Data Type']].drop_duplicates().sort_values('Date', ascending=False)
-            options['label'] = options.apply(lambda x: f"{x['Date']} | {x['Player Name']} | {x['Data Type']}", axis=1)
-            option_map = {row['label']: row for _, row in options.iterrows()}
-            
-            selected_label = st.selectbox("削除するデータセットを選択", list(option_map.keys()))
-            sel = option_map[selected_label]
-            
-            target_condition = (latest_db['Player Name'] == sel['Player Name']) & (latest_db['Date'] == sel['Date']) & (latest_db['Data Type'] == sel['Data Type'])
-            st.info(f"選択: {len(latest_db[target_condition])} 球のデータを削除します")
-            
-            if st.checkbox("上記データを完全に削除する"):
-                if st.button("🚨 実行", type="primary"):
-                    updated_db = latest_db[~target_condition]
-                    success, msg = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
-                    if success:
-                        st.success("削除成功しました")
-                        st.rerun()
+        if uploaded_file is not None:
+            if st.button("🚀 投球データをGitHubへ保存", key="btn_save_pitch", use_container_width=True):
+                with st.spinner("データを処理してGitHubへ同期保存中..."):
+                    try:
+                        file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
+                        if file_ext == '.csv':
+                            temp_df = pd.read_csv(uploaded_file, nrows=15, header=None)
+                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            uploaded_file.seek(0)
+                            new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                        else:
+                            temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
+                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            uploaded_file.seek(0)
+                            new_df = pd.read_excel(uploaded_file, skiprows=skip)
+
+                        new_df = new_df.rename(columns=COLUMN_MAP)
+                        new_df['Player Name'] = target_player
+                        new_df['Date'] = target_date.strftime('%Y-%m-%d')
+                        new_df['Data Type'] = data_type
+                        new_df['Data Source'] = data_source
+                        
+                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
+                        for c in cols_to_num:
+                            if c in new_df.columns:
+                                new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
+
+                        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+                        if not latest_db.empty:
+                            target_condition = (
+                                (latest_db['Player Name'] == target_player) & 
+                                (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                                (latest_db['Data Type'] == data_type)
+                            )
+                            modified_db = latest_db[~target_condition]
+                            updated_db = pd.concat([modified_db, new_df], ignore_index=True)
+                        else:
+                            updated_db = new_df
+
+                        success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
+                        if success:
+                            st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
+                            st.balloons()
+                        else:
+                            st.error(f"❌ GitHubへの保存に失敗しました: {message}")
+                    except Exception as e:
+                        st.error(f"❌ 解析・保存エラー: {e}")
+
+    else:
+        st.subheader("🗑️ 登録済みデータの削除")
+        st.warning(f"現在、上の選択欄で「{target_player}」の「{target_date.strftime('%Y-%m-%d')}」における「{data_type}」が選択されています。")
+        confirm_delete = st.checkbox("上記に間違いがなければ、ここにチェックを入れてください。")
+        
+        if st.button("🚨 選択したデータを完全に削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
+            with st.spinner("GitHub上のデータベースから削除中..."):
+                try:
+                    latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+                    if latest_db.empty:
+                        st.error("❌ データベースにデータが存在しないか、読み込めないため削除できません。")
+                    else:
+                        target_condition = (
+                            (latest_db['Player Name'] == target_player) & 
+                            (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
+                            (latest_db['Data Type'] == data_type)
+                        )
+                        match_count = len(latest_db[target_condition])
+                        
+                        if match_count == 0:
+                            st.info(f"ℹ️ 指定された条件に一致するデータは登録されていません。")
+                        else:
+                            updated_db = latest_db[~target_condition]
+                            success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
+                            if success:
+                                st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
+                            else:
+                                st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
+                except Exception as e:
+                    st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
+
 
 # ==========================================
 # タブ1：分析フィードバック
