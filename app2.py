@@ -77,11 +77,8 @@ def load_data_from_github(file_path):
         content = res.json()
         download_url = content["download_url"]
         file_res = requests.get(download_url)
-        df = pd.read_excel(io.BytesIO(file_res.content))
-        # 💡 SinkerをTwo seamに置換
-        if 'TaggedPitchType' in df.columns:
-            df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
-        return df
+        return pd.read_excel(io.BytesIO(file_res.content))
+        df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
     else:
         return pd.DataFrame()
 
@@ -172,7 +169,7 @@ COLOR_MAP_PITCH = {
     "Cutter": "orange", "Cut": "orange", "カット": "orange",
     "Slider": "yellow", "SL": "yellow", "スライダー": "yellow",
     "Curve": "darkblue", "Curveball": "darkblue", "CU": "darkblue", "カーブ": "darkblue",
-    "Sinker": "pink", "SI": "pink", "シンカー": "pink", "Two seam": "pink"
+    "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
 }
 
 COLUMN_MAP = {
@@ -546,4 +543,4 @@ with tab1:
                     """
                     st.components.v1.html(html_code, height=600)
         else:
-            st.warning("選択した期間・条件に一致するデータがありません。")
+            st.warning("選択した期間・条件に一致するデータがありません。") 
