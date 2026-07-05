@@ -449,8 +449,9 @@ with tab1:
 
                 # --- 3Dスピンビジュアライザー ---
                 st.divider()
-                st.subheader("⚾️ 3Dスピンビジュアライザー")
+                st.subheader("⚾️ 3D軌道")
                 valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
+                
                 if not valid_df.empty:
                     available_types = sorted(valid_df['Pitch Type'].dropna().unique())
                     sel_type = st.selectbox("球種を選択して回転を確認:", available_types, key="pitch_viz_select")
@@ -463,6 +464,7 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
 
+                    #回転計算ロジック
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
@@ -484,11 +486,13 @@ with tab1:
 
                     multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
+                    #HTML/JS描画
                     html_code = f"""
                     <div id="ball_canvas" style="width:100%; height:600px;"></div>
                     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
                     <script>
-                        var points = {{ seam: {json.dumps(seam_points)} }};
+                    (function(){{
+                        var points = {json.dumps(seam_points};
                         var axis = {json.dumps(axis.tolist())};
                         var rpm = {avg_rpm};
                         var mult = {multiplier};
@@ -503,32 +507,20 @@ with tab1:
                             ];
                         }}
 
-                        var bx = [], by = [], bz = [], n = 22;
-                        for(var i=0; i<=n; i++) {{
-                            var phi = Math.PI * i / n; bx[i] = []; by[i] = []; bz[i] = [];
-                            for(var j=0; j<=n; j++) {{
-                                var theta = 2 * Math.PI * j / n;
-                                bx[i][j] = Math.cos(theta) * Math.sin(phi);
-                                by[i][j] = Math.sin(theta) * Math.sin(phi);
-                                bz[i][j] = Math.cos(phi);
-                            }}
-                        }}
-
-                        var data = [
-                            {{ type: 'surface', x: bx, y: by, z: bz, colorscale: [['0','#eee'],['1','#eee']], showscale: false, opacity: 0.7 }},
-                            {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 25}} }},
-                            {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 10}} }}
+                        var data= [
+                            {{type: 'scatter3d', mode: 'lines', x:[], y:[], z[], line:{{color: '#BC1010', width: 15}} }},
+                            {{type: 'scatter3d', mode: 'lines', x:[axis[0]*-1.5, axis[0]*1.5], y:[axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line:{{color: '#333', width:5}} }}
                         ];
 
                         var layout = {{
                             scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} }},
                             margin: {{l:0, r:0, b:0, t:0}}
-                        ];
+                        }};
 
-                        Plotly.newPlot('ball_canvas', data, layout);
+                        Plotly.newPlot('ball_canvas', data, layout, {{responsive: true}});
 
                         function animate() {{
-                            cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 1000;
+                            cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 60;
                             var rx = [], ry = [], rz = [];
                             for(var i=0; i<points.seam.length; i++) {{
                                 var r = rotatePoint(points.seam[i], axis, cur_angle);
