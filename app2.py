@@ -463,76 +463,69 @@ with tab1:
                     tilt_deg = time_to_degrees(avg_tilt_str)
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
+                # 3D回転座標計算
+            t = np.linspace(0, 2 * np.pi, 200)
+            alpha = 0.4
+            sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+            base_pts = np.vstack([sx, sz, sy]).T 
+            
+            tilt_rad = np.deg2rad(tilt_deg)
+            rot_y = np.array([[np.cos(tilt_rad), 0, -np.sin(tilt_rad)], [0, 1, 0], [np.sin(tilt_rad), 0, np.cos(tilt_rad)]])
+            gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
+            g_sign = -1 if hand == "右" else 1
+            rot_gyro = np.array([[1, 0, 0], [0, np.cos(gyro_rad), g_sign*np.sin(gyro_rad)], [0, -g_sign*np.sin(gyro_rad), np.cos(gyro_rad)]])
+            
+            combined_rot = rot_y @ rot_gyro
+            axis = combined_rot @ np.array([0.0, 0.0, 1.0])
+            seam_points = (base_pts @ combined_rot.T).tolist()
+            multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
 
-                    #回転計算ロジック
-                    t = np.linspace(0, 2 * np.pi, 200)
-                    alpha = 0.4
-                    sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-                    base_pts = np.vstack([sx, sz, sy]).T 
+            # HTML生成
+            seam_json = json.dumps(seam_points)
+            axis_json = json.dumps(axis.tolist())
+            
+            html_code = f"""
+            <div id="ball_canvas" style="width:100%; height:600px;"></div>
+            <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+            <script>
+                (function() {{
+                    var points = {seam_json};
+                    var axis = {axis_json};
+                    var rpm = {avg_rpm};
+                    var mult = {multiplier};
+                    var cur_angle = 0;
 
-                    tilt_rad = np.deg2rad(tilt_deg)
-                    cos_t, sin_t = np.cos(tilt_rad), np.sin(tilt_rad)
-                    rot_y = np.array([[cos_t, 0, -sin_t], [0, 1, 0], [sin_t, 0, cos_t]])
-
-                    gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-                    cos_g, sin_g = np.cos(gyro_rad), np.sin(gyro_rad)
-                    g_sign = -1 if hand == "right" or hand == "右" else 1
-                    rot_gyro = np.array([[1, 0, 0], [0, cos_g, g_sign*sin_g], [0, -g_sign*sin_g, cos_g]])
-
-                    combined_rot = rot_y @ rot_gyro
-                    axis = combined_rot @ np.array([0.0, 0.0, 1.0])
-                    tilted_pts = (base_pts @ combined_rot.T)
-                    seam_points = (tilted_pts / np.linalg.norm(tilted_pts, axis=1, keepdims=True)).tolist()
-
-                    multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
-
-                    #HTML/JS描画
-                    html_code = f"""
-                    <div id="ball_canvas" style="width:100%; height:600px;"></div>
-                    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-                    <script>
-                    (function(){{
-                        var points = {json.dumps(seam_points};
-                        var axis = {json.dumps(axis.tolist())};
-                        var rpm = {avg_rpm};
-                        var mult = {multiplier};
-                        var cur_angle = 0;
-
-                        function rotatePoint(p, ax, a) {{
-                            var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
-                            return [
-                                p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
-                                p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
-                                p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
-                            ];
-                        }}
-
-                        var data= [
-                            {{type: 'scatter3d', mode: 'lines', x:[], y:[], z[], line:{{color: '#BC1010', width: 15}} }},
-                            {{type: 'scatter3d', mode: 'lines', x:[axis[0]*-1.5, axis[0]*1.5], y:[axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line:{{color: '#333', width:5}} }}
+                    function rotate(p, ax, a) {{
+                        var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
+                        return [
+                            p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
+                            p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
+                            p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
                         ];
+                    }}
 
-                        var layout = {{
-                            scene: {{ xaxis: {{visible: false}}, yaxis: {{visible: false}}, zaxis: {{visible: false}}, aspectmode: 'cube', camera: {{ eye: {{x: 0, y: -2.3, z: 0}}, up: {{x: 0, y: 0, z: 1}} }} }},
-                            margin: {{l:0, r:0, b:0, t:0}}
-                        }};
+                    var data = [
+                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 15}} }},
+                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 5}} }}
+                    ];
+                    var layout = {{
+                        scene: {{ xaxis: {{visible:false}}, yaxis: {{visible:false}}, zaxis: {{visible:false}}, aspectmode:'cube', camera: {{eye: {{x:1.5, y:1.5, z:1.5}} }} }},
+                        margin: {{l:0, r:0, b:0, t:0}}
+                    }};
+                    Plotly.newPlot('ball_canvas', data, layout, {{responsive: true}});
 
-                        Plotly.newPlot('ball_canvas', data, layout, {{responsive: true}});
-
-                        function animate() {{
-                            cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 60;
-                            var rx = [], ry = [], rz = [];
-                            for(var i=0; i<points.seam.length; i++) {{
-                                var r = rotatePoint(points.seam[i], axis, cur_angle);
-                                rx.push(r[0]*1.01); ry.push(r[1]*1.01); rz.push(r[2]*1.01);
-                                if ((i+1) % 2 == 0) {{ rx.push(null); ry.push(null); rz.push(null); }}
-                            }}
-                            Plotly.restyle('ball_canvas', {{x: [rx], y: [ry], z: [rz]}}, [1]);
-                            requestAnimationFrame(animate);
+                    function animate() {{
+                        cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 60;
+                        var rx = [], ry = [], rz = [];
+                        for(var i=0; i<points.length; i++) {{
+                            var r = rotate(points[i], axis, cur_angle);
+                            rx.push(r[0]); ry.push(r[1]); rz.push(r[2]);
                         }}
-                        animate();
-                    </script>
-                    """
-                    st.components.v1.html(html_code, height=600)
-        else:
-            st.warning("選択した期間・条件に一致するデータがありません。") 
+                        Plotly.restyle('ball_canvas', {{x: [rx, null], y: [ry, null], z: [rz, null]}}, [0]);
+                        requestAnimationFrame(animate);
+                    }}
+                    animate();
+                }})();
+            </script>
+            """
+            st.components.v1.html(html_code, height=600)
