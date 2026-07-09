@@ -1,5 +1,7 @@
-pandas
-openpyxl
-requests
-xlsxwriter
 streamlit
+pandas
+numpy
+plotly
+openpyxl
+xlsxwriter
+requests
