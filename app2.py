@@ -209,8 +209,13 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True)
+    # 最上部でモード選択
+    manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True, key="pitch_manage_mode")
+    st.divider()
     
+    # ------------------------------------------
+    # モード1：新規登録
+    # ------------------------------------------
     if "登録" in manage_mode:
         st.subheader("📥 投球データのアップロード")
         
@@ -222,7 +227,7 @@ with tab2:
         with col_reg3:
             data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
         
-        data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True)
+        data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True, key="pitch_reg_source")
         uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
         
         if uploaded_file is not None:
@@ -273,6 +278,9 @@ with tab2:
                     except Exception as e:
                         st.error(f"❌ 解析・保存エラー: {e}")
 
+    # ------------------------------------------
+    # モード2：削除
+    # ------------------------------------------
     else:
         st.subheader("🗑️ 登録済みデータの削除")
         
@@ -282,21 +290,21 @@ with tab2:
         if latest_db.empty:
             st.info("現在、データベースに削除可能なデータが登録されていません。")
         else:
-            # データの安全な処理用にDateカラム等を整形
+            # データの整形
             latest_db['Date'] = latest_db['Date'].astype(str)
             if 'Data Source' not in latest_db.columns:
                 latest_db['Data Source'] = "不明/標準"
             else:
                 latest_db['Data Source'] = latest_db['Data Source'].fillna("不明/標準")
 
-            # 選手一覧を取得
+            # 登録のある選手一覧を取得
             registered_players = sorted(latest_db['Player Name'].dropna().unique())
             
             col_del1, col_del2 = st.columns(2)
             with col_del1:
                 del_player = st.selectbox("1. 削除対象の選手を選択", registered_players, key="del_player_select")
             
-            # 選択された選手のデータのみ抽出
+            # 選択された選手のデータ抽出
             player_db = latest_db[latest_db['Player Name'] == del_player]
             
             # 登録済みの（日付、練習種別、データ元）グループを作成
@@ -306,16 +314,16 @@ with tab2:
             if existing_groups.empty:
                 st.warning("選択した選手のデータが見つかりませんでした。")
             else:
-                # ユーザーがわかりやすい表示用ラベルを作成
+                # ユーザー用のドロップダウン選択肢作成
                 group_options = []
                 for idx, row in existing_groups.iterrows():
                     label = f"📅 {row['Date']} | 🏷️ {row['Data Type']} | ⚙️ {row['Data Source']} ({row['投球数']}球)"
                     group_options.append(label)
                 
                 with col_del2:
-                    selected_group_label = st.selectbox("2. 削除対象のセッション（日付・種別）を選択", group_options, key="del_group_select")
+                    selected_group_label = st.selectbox("2. 削除対象のデータ（日付・種別）を選択", group_options, key="del_group_select")
                 
-                # 選択されたラベルから条件を逆引き
+                # 選択された条件の抽出
                 selected_idx = group_options.index(selected_group_label)
                 target_row = existing_groups.iloc[selected_idx]
                 
@@ -323,7 +331,6 @@ with tab2:
                 sel_type = target_row['Data Type']
                 sel_source = target_row['Data Source']
                 
-                # 該当するセッションのデータを抽出
                 session_mask = (
                     (latest_db['Player Name'] == del_player) & 
                     (latest_db['Date'] == sel_date) & 
@@ -332,61 +339,59 @@ with tab2:
                 )
                 session_df = latest_db[session_mask]
                 
-                st.divider()
-                st.markdown("#### 🎯 削除オプションの設定")
+                st.write("---")
+                st.markdown("#### 🎯 削除範囲の設定")
                 
                 del_scope = st.radio(
-                    "削除範囲を選択してください", 
+                    "削除の単位を選択してください", 
                     ["このセッションのデータをすべて削除", "特定の球種のみ削除", "選択した1球（行）のみ削除"],
-                    horizontal=True
+                    horizontal=True,
+                    key="del_scope_radio"
                 )
                 
                 rows_to_delete_mask = None
                 
                 if del_scope == "このセッションのデータをすべて削除":
                     rows_to_delete_mask = session_mask
-                    st.warning(f"⚠️ {del_player} の 【{sel_date} | {sel_type} | {sel_source}】 のデータ全 {len(session_df)} 件が削除対象です。")
+                    st.warning(f"⚠️ **{del_player}** の 【{sel_date} | {sel_type} | {sel_source}】 全 {len(session_df)} 件のデータを削除します。")
                 
                 elif del_scope == "特定の球種のみ削除":
                     if 'Pitch Type' in session_df.columns:
                         avail_pitch_types = sorted(session_df['Pitch Type'].dropna().unique())
-                        target_pitch_type = st.selectbox("削除する球種を選択", avail_pitch_types)
+                        target_pitch_type = st.selectbox("削除する球種を選択", avail_pitch_types, key="del_pitch_type_select")
                         
                         rows_to_delete_mask = session_mask & (latest_db['Pitch Type'] == target_pitch_type)
                         delete_count = len(latest_db[rows_to_delete_mask])
-                        st.warning(f"⚠️ {del_player} の 【{sel_date} | {sel_type}】 から 「{target_pitch_type}」（計 {delete_count} 件）を削除します。")
+                        st.warning(f"⚠️ **{del_player}** の 【{sel_date} | {sel_type}】 から 「{target_pitch_type}」（計 {delete_count} 件）を削除します。")
                     else:
                         st.error("データに球種(Pitch Type)のカラムが存在しません。")
                 
                 elif del_scope == "選択した1球（行）のみ削除":
-                    st.write("▼ 削除する特定の1球を選択してください")
                     preview_display = session_df.reset_index()
-                    display_cols = [c for c in ['index', 'Pitch Type', 'Velocity', 'Spin Rate', 'VB', 'HB'] if c in preview_display.columns]
-                    
                     selected_index = st.selectbox(
-                        "削除対象のデータ行（Index）を選択", 
+                        "削除対象の1球を選択", 
                         options=preview_display['index'].tolist(),
-                        format_func=lambda x: f"行ID: {x} - {preview_display.loc[preview_display['index']==x, 'Pitch Type'].values[0] if 'Pitch Type' in preview_display.columns else ''} ({preview_display.loc[preview_display['index']==x, 'Velocity'].values[0] if 'Velocity' in preview_display.columns else ''} km/h)"
+                        format_func=lambda x: f"行ID: {x} - {preview_display.loc[preview_display['index']==x, 'Pitch Type'].values[0] if 'Pitch Type' in preview_display.columns else ''} ({preview_display.loc[preview_display['index']==x, 'Velocity'].values[0] if 'Velocity' in preview_display.columns else ''} km/h)",
+                        key="del_single_row_select"
                     )
                     
-                    rows_to_delete_mask = latest_db.index == selected_index
+                    rows_to_delete_mask = (latest_db.index == selected_index)
                     st.warning(f"⚠️ 行ID: {selected_index} の1球データを削除します。")
 
-                # 削除確認と実行ボタン
+                # 実行確認ボタン
                 if rows_to_delete_mask is not None:
                     st.write("---")
-                    confirm_delete = st.checkbox("上記の内容を確認し、削除に同意します。")
+                    confirm_delete = st.checkbox("上記の内容を確認し、削除に同意します。", key="del_confirm_check")
                     
                     if st.button("🚨 選択したデータを削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
                         with st.spinner("GitHub上のデータベースから削除中..."):
                             try:
-                                # 対象データを削除した最新DFを作成
                                 updated_db = latest_db[~rows_to_delete_mask]
                                 
                                 success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH, is_delete_operation=True)
                                 if success:
                                     st.success("💥 データの削除が正常に完了しました！")
-                                    st.rerun()  # 画面を更新して最新化
+                                    st.rerun()
                                 else:
                                     st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
                             except Exception as e:
