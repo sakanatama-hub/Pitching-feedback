@@ -82,10 +82,9 @@ def load_data_from_github(file_path):
     else:
         return pd.DataFrame()
 
-def save_to_github_with_retry(df_to_save, file_path, max_retries=3, is_delete_operation=False):
+def save_to_github_direct(df_to_save, file_path, message_text="Update pitch data"):
     """
-    💡 【コンフリクト徹底対策】
-    保存・削除時に最新データを再取得して自動マージ＆リトライする関数
+    データフレームをExcelデータに変換してGitHubへ直接上書き保存する関数
     """
     if not GITHUB_TOKEN:
         return False, "Secretsにトークンが設定されていません。"
@@ -93,67 +92,33 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3, is_delete_op
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    for attempt in range(max_retries):
-        res = requests.get(url, headers=headers)
-        sha = None
-        
-        if res.status_code == 200:
-            file_info = res.json()
-            sha = file_info.get("sha")
-            
-        # 削除処理の場合はそのまま引数のdf_to_saveを保存、追加処理の場合は上書き条件チェックを行う
-        if is_delete_operation:
-            final_df = df_to_save
-        else:
-            current_db = pd.DataFrame()
-            if res.status_code == 200:
-                download_url = file_info["download_url"]
-                file_res = requests.get(download_url)
-                current_db = pd.read_excel(io.BytesIO(file_res.content))
-                
-            if not current_db.empty and not df_to_save.empty:
-                new_player = df_to_save.iloc[-1]['Player Name']
-                new_date = df_to_save.iloc[-1]['Date']
-                new_type = df_to_save.iloc[-1]['Data Type']
-                
-                target_condition = (
-                    (current_db['Player Name'] == new_player) & 
-                    (current_db['Date'] == new_date) & 
-                    (current_db['Data Type'] == new_type)
-                )
-                modified_db = current_db[~target_condition]
-                
-                just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
-                                           (df_to_save['Date'] == new_date) & 
-                                           (df_to_save['Data Type'] == new_type)]
-                final_df = pd.concat([modified_db, just_new_data], ignore_index=True)
-            else:
-                final_df = df_to_save
+    res = requests.get(url, headers=headers)
+    sha = None
+    if res.status_code == 200:
+        file_info = res.json()
+        sha = file_info.get("sha")
 
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            final_df.to_excel(writer, index=False)
-        excel_data = output.getvalue()
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_to_save.to_excel(writer, index=False)
+    excel_data = output.getvalue()
+    
+    content_b64 = base64.b64encode(excel_data).decode("utf-8")
+    
+    payload = {
+        "message": message_text,
+        "content": content_b64
+    }
+    if sha:
+        payload["sha"] = sha
         
-        content_b64 = base64.b64encode(excel_data).decode("utf-8")
-        
-        payload = {
-            "message": f"Update pitch data (Attempt {attempt + 1})",
-            "content": content_b64
-        }
-        if sha:
-            payload["sha"] = sha
-            
-        put_res = requests.put(url, headers=headers, json=payload)
-        
-        if put_res.status_code in [200, 201]:
-            st.session_state['pitch_df'] = final_df
-            return True, "成功"
-        
-        if attempt < max_retries - 1:
-            time.sleep(1.5)
-        else:
-            return False, put_res.json().get("message", "連続送信によるコンフリクトが解決できませんでした。")
+    put_res = requests.put(url, headers=headers, json=payload)
+    
+    if put_res.status_code in [200, 201]:
+        st.session_state['pitch_df'] = df_to_save
+        return True, "成功"
+    else:
+        return False, put_res.json().get("message", "GitHubへの保存に失敗しました。")
 
 # --- アプリ起動時：GitHubから最新の投球データベースを読み込み ---
 if 'pitch_df' not in st.session_state:
@@ -209,14 +174,20 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    # 最上部でモード選択
-    manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True, key="pitch_manage_mode")
-    st.divider()
+    # 完全に明確な画面分岐を設定
+    op_mode = st.radio(
+        "行う操作を選択してください",
+        ["📥 新規データの追加登録", "🗑️ 登録済みデータの選択削除"],
+        horizontal=True,
+        key="pitch_manage_op_mode"
+    )
     
-    # ------------------------------------------
-    # モード1：新規登録
-    # ------------------------------------------
-    if "登録" in manage_mode:
+    st.divider()
+
+    # ==========================================
+    # 分岐 1：新規データの追加登録
+    # ==========================================
+    if op_mode == "📥 新規データの追加登録":
         st.subheader("📥 投球データのアップロード")
         
         col_reg1, col_reg2, col_reg3 = st.columns(3)
@@ -259,6 +230,7 @@ with tab2:
                         
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
+                            # 同日・同選手の既存データを置き換えて結合
                             target_condition = (
                                 (latest_db['Player Name'] == target_player) & 
                                 (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
@@ -269,7 +241,7 @@ with tab2:
                         else:
                             updated_db = new_df
                             
-                        success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
+                        success, message = save_to_github_direct(updated_db, GITHUB_PITCH_FILE_PATH, f"Add pitch data: {target_player}")
                         if success:
                             st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
                             st.balloons()
@@ -278,124 +250,130 @@ with tab2:
                     except Exception as e:
                         st.error(f"❌ 解析・保存エラー: {e}")
 
-    # ------------------------------------------
-    # モード2：削除
-    # ------------------------------------------
+    # ==========================================
+    # 分岐 2：登録済みデータの選択削除
+    # ==========================================
     else:
-        st.subheader("🗑️ 登録済みデータの削除")
+        st.subheader("🗑️ 登録済みデータの選択・完全削除")
         
-        # GitHubから最新データをロード
-        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+        # 画面切り替え時に最新のデータを必ず再読み込み
+        db_df = load_data_from_github(GITHUB_PITCH_FILE_PATH)
         
-        if latest_db.empty:
-            st.info("現在、データベースに削除可能なデータが登録されていません。")
+        if db_df.empty:
+            st.warning("現在、データベースに登録済みのデータが見つかりません。")
         else:
-            # データの整形
-            latest_db['Date'] = latest_db['Date'].astype(str)
-            if 'Data Source' not in latest_db.columns:
-                latest_db['Data Source'] = "不明/標準"
+            # 必須カラムの補正
+            db_df['Date'] = db_df['Date'].astype(str)
+            if 'Data Source' not in db_df.columns:
+                db_df['Data Source'] = "標準"
             else:
-                latest_db['Data Source'] = latest_db['Data Source'].fillna("不明/標準")
-
-            # 登録のある選手一覧を取得
-            registered_players = sorted(latest_db['Player Name'].dropna().unique())
+                db_df['Data Source'] = db_df['Data Source'].fillna("標準")
+                
+            # 登録選手一覧を取得
+            registered_players = sorted(db_df['Player Name'].dropna().unique().tolist())
             
-            col_del1, col_del2 = st.columns(2)
-            with col_del1:
-                del_player = st.selectbox("1. 削除対象の選手を選択", registered_players, key="del_player_select")
+            # Step 1: 選手の選択
+            del_selected_player = st.selectbox("1. 削除対象の選手を選択してください", registered_players, key="del_p_select")
             
-            # 選択された選手のデータ抽出
-            player_db = latest_db[latest_db['Player Name'] == del_player]
+            # 選択された選手のデータのみフィルタリング
+            player_records = db_df[db_df['Player Name'] == del_selected_player]
             
-            # 登録済みの（日付、練習種別、データ元）グループを作成
-            group_cols = ['Date', 'Data Type', 'Data Source']
-            existing_groups = player_db.groupby(group_cols).size().reset_index(name='投球数')
+            # 該当選手が登録しているセッション（日付・練習種別・計測機器）のユニーク一覧を作成
+            group_keys = ['Date', 'Data Type', 'Data Source']
+            sessions = player_records.groupby(group_keys).size().reset_index(name='投球数')
             
-            if existing_groups.empty:
-                st.warning("選択した選手のデータが見つかりませんでした。")
+            if sessions.empty:
+                st.info(f"ℹ️ {del_selected_player} の登録データはありません。")
             else:
-                # ユーザー用のドロップダウン選択肢作成
-                group_options = []
-                for idx, row in existing_groups.iterrows():
-                    label = f"📅 {row['Date']} | 🏷️ {row['Data Type']} | ⚙️ {row['Data Source']} ({row['投球数']}球)"
-                    group_options.append(label)
+                # ドロップダウン用のわかりやすい文字列リストの作成
+                session_options = []
+                for idx, r in sessions.iterrows():
+                    session_options.append(f"{r['Date']} | {r['Data Type']} | {r['Data Source']} ({r['投球数']}球)")
                 
-                with col_del2:
-                    selected_group_label = st.selectbox("2. 削除対象のデータ（日付・種別）を選択", group_options, key="del_group_select")
+                # Step 2: 対象データのセッションを選択
+                del_selected_session = st.selectbox("2. 削除するデータ項目を選択してください", session_options, key="del_s_select")
                 
-                # 選択された条件の抽出
-                selected_idx = group_options.index(selected_group_label)
-                target_row = existing_groups.iloc[selected_idx]
+                # 選択されたセッション条件の抽出
+                sel_idx = session_options.index(del_selected_session)
+                target_session = sessions.iloc[sel_idx]
                 
-                sel_date = target_row['Date']
-                sel_type = target_row['Data Type']
-                sel_source = target_row['Data Source']
+                s_date = target_session['Date']
+                s_type = target_session['Data Type']
+                s_source = target_session['Data Source']
                 
-                session_mask = (
-                    (latest_db['Player Name'] == del_player) & 
-                    (latest_db['Date'] == sel_date) & 
-                    (latest_db['Data Type'] == sel_type) & 
-                    (latest_db['Data Source'] == sel_source)
+                # 削除対象となる行のマスク条件
+                delete_target_mask = (
+                    (db_df['Player Name'] == del_selected_player) & 
+                    (db_df['Date'] == s_date) & 
+                    (db_df['Data Type'] == s_type) & 
+                    (db_df['Data Source'] == s_source)
                 )
-                session_df = latest_db[session_mask]
                 
-                st.write("---")
-                st.markdown("#### 🎯 削除範囲の設定")
+                target_df = db_df[delete_target_mask]
+                
+                # Step 3: 削除の範囲オプション選択
+                st.markdown("---")
+                st.subheader("🎯 削除の細かさを指定")
                 
                 del_scope = st.radio(
-                    "削除の単位を選択してください", 
-                    ["このセッションのデータをすべて削除", "特定の球種のみ削除", "選択した1球（行）のみ削除"],
-                    horizontal=True,
-                    key="del_scope_radio"
+                    "削除の範囲を選択してください",
+                    ["選択したセッションの全データを一括削除", "指定した球種のみ削除", "特定の1球を選んで削除"],
+                    key="del_scope_option"
                 )
                 
-                rows_to_delete_mask = None
+                final_delete_mask = delete_target_mask.copy()
                 
-                if del_scope == "このセッションのデータをすべて削除":
-                    rows_to_delete_mask = session_mask
-                    st.warning(f"⚠️ **{del_player}** の 【{sel_date} | {sel_type} | {sel_source}】 全 {len(session_df)} 件のデータを削除します。")
+                if del_scope == "選択したセッションの全データを一括削除":
+                    st.error(f"🚨 **削除内容確認**: 【{del_selected_player}】 の **{s_date} ({s_type} / {s_source})** 全 {len(target_df)} 件を削除します。")
                 
-                elif del_scope == "特定の球種のみ削除":
-                    if 'Pitch Type' in session_df.columns:
-                        avail_pitch_types = sorted(session_df['Pitch Type'].dropna().unique())
-                        target_pitch_type = st.selectbox("削除する球種を選択", avail_pitch_types, key="del_pitch_type_select")
+                elif del_scope == "指定した球種のみ削除":
+                    if 'Pitch Type' in target_df.columns:
+                        avail_types = sorted(target_df['Pitch Type'].dropna().unique().tolist())
+                        sel_pt = st.selectbox("削除したい球種を選択", avail_types, key="del_pt_select")
                         
-                        rows_to_delete_mask = session_mask & (latest_db['Pitch Type'] == target_pitch_type)
-                        delete_count = len(latest_db[rows_to_delete_mask])
-                        st.warning(f"⚠️ **{del_player}** の 【{sel_date} | {sel_type}】 から 「{target_pitch_type}」（計 {delete_count} 件）を削除します。")
+                        final_delete_mask = delete_target_mask & (db_df['Pitch Type'] == sel_pt)
+                        del_cnt = len(db_df[final_delete_mask])
+                        st.error(f"🚨 **削除内容確認**: 【{del_selected_player}】 の **{s_date} ({s_type})** から **球種: {sel_pt}** ({del_cnt}件) を削除します。")
                     else:
-                        st.error("データに球種(Pitch Type)のカラムが存在しません。")
-                
-                elif del_scope == "選択した1球（行）のみ削除":
-                    preview_display = session_df.reset_index()
-                    selected_index = st.selectbox(
-                        "削除対象の1球を選択", 
-                        options=preview_display['index'].tolist(),
-                        format_func=lambda x: f"行ID: {x} - {preview_display.loc[preview_display['index']==x, 'Pitch Type'].values[0] if 'Pitch Type' in preview_display.columns else ''} ({preview_display.loc[preview_display['index']==x, 'Velocity'].values[0] if 'Velocity' in preview_display.columns else ''} km/h)",
-                        key="del_single_row_select"
-                    )
-                    
-                    rows_to_delete_mask = (latest_db.index == selected_index)
-                    st.warning(f"⚠️ 行ID: {selected_index} の1球データを削除します。")
+                        st.warning("球種データが見つからないため一括削除を行います。")
 
-                # 実行確認ボタン
-                if rows_to_delete_mask is not None:
-                    st.write("---")
-                    confirm_delete = st.checkbox("上記の内容を確認し、削除に同意します。", key="del_confirm_check")
+                elif del_scope == "特定の1球を選んで削除":
+                    preview_df = target_df.reset_index()
                     
-                    if st.button("🚨 選択したデータを削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
-                        with st.spinner("GitHub上のデータベースから削除中..."):
-                            try:
-                                updated_db = latest_db[~rows_to_delete_mask]
-                                
-                                success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH, is_delete_operation=True)
-                                if success:
-                                    st.success("💥 データの削除が正常に完了しました！")
-                                    st.rerun()
-                                else:
-                                    st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
-                            except Exception as e:
-                                st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
+                    row_options = preview_df['index'].tolist()
+                    def format_row(row_idx):
+                        r = preview_df[preview_df['index'] == row_idx].iloc[0]
+                        pt = r['Pitch Type'] if 'Pitch Type' in r else '不明'
+                        vel = f"{r['Velocity']} km/h" if 'Velocity' in r else ''
+                        return f"ID:{row_idx} - 球種:{pt} {vel}"
+
+                    selected_row_idx = st.selectbox("削除する1球（行）を選択", row_options, format_func=format_row, key="del_row_select")
+                    final_delete_mask = (db_df.index == selected_row_idx)
+                    st.error(f"🚨 **削除内容確認**: ID {selected_row_idx} の1球データのみ削除します。")
+
+                # Step 4: プレビュー表示と削除ボタン
+                st.markdown("---")
+                st.write("▼ 削除対象となるデータのプレビュー")
+                st.dataframe(db_df[final_delete_mask][['Player Name', 'Date', 'Data Type', 'Pitch Type', 'Velocity']].head(10), use_container_width=True)
+                
+                confirm_check = st.checkbox("上記データを削除することを確認しました", key="del_final_check")
+                
+                if st.button("🚨 このデータを完全に削除する", key="btn_execute_delete", disabled=not confirm_check, type="primary", use_container_width=True):
+                    with st.spinner("GitHub上のデータベースから削除を実行中..."):
+                        try:
+                            # 対象データを抽出から除外して保存
+                            cleaned_db = db_df[~final_delete_mask]
+                            
+                            success, msg = save_to_github_direct(cleaned_db, GITHUB_PITCH_FILE_PATH, f"Delete pitch data: {del_selected_player}")
+                            
+                            if success:
+                                st.success("🎉 データの削除が正常に完了しました！")
+                                time.sleep(1)
+                                st.rerun()  # 画面を再描画
+                            else:
+                                st.error(f"❌ 削除データの保存に失敗しました: {msg}")
+                        except Exception as ex:
+                            st.error(f"❌ 削除処理エラー: {ex}")
 
 # ==========================================
 # タブ1：分析フィードバック
