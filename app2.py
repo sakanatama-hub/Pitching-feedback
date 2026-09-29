@@ -21,7 +21,7 @@ def check_password():
     """パスワードが正しいかチェックし、セッション状態を更新する"""
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
-
+    
     # すでに認証済みの場合はTrueを返す
     if st.session_state["authenticated"]:
         return True
@@ -31,7 +31,6 @@ def check_password():
     
     with st.form("login_form"):
         password_input = st.text_input("パスワードを入力してください", type="password")
-        # 🛠️ 【修正箇所】正しいメソッド名 st.form_submit_button に修正
         submit_button = st.form_submit_button("ログイン")
         
         if submit_button:
@@ -46,7 +45,6 @@ def check_password():
 # パスワードチェックが通らない場合は、ここでアプリの実行をストップさせる
 if not check_password():
     st.stop()
-
 
 # ==========================================
 # 🚀 以下、認証成功時のみ実行されるメインロジック
@@ -77,15 +75,17 @@ def load_data_from_github(file_path):
         content = res.json()
         download_url = content["download_url"]
         file_res = requests.get(download_url)
-        return pd.read_excel(io.BytesIO(file_res.content))
-        df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
+        df = pd.read_excel(io.BytesIO(file_res.content))
+        if 'TaggedPitchType' in df.columns:
+            df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
+        return df
     else:
         return pd.DataFrame()
 
-def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
+def save_to_github_with_retry(df_to_save, file_path, max_retries=3, is_delete_operation=False):
     """
     💡 【コンフリクト徹底対策】
-    連続投稿で上書き衝突が起きた場合、最新データを再取得して自動マージ＆リトライする関数
+    保存・削除時に最新データを再取得して自動マージ＆リトライする関数
     """
     if not GITHUB_TOKEN:
         return False, "Secretsにトークンが設定されていません。"
@@ -93,36 +93,42 @@ def save_to_github_with_retry(df_to_save, file_path, max_retries=3):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    new_player = df_to_save.iloc[-1]['Player Name'] if not df_to_save.empty else ""
-    new_date = df_to_save.iloc[-1]['Date'] if not df_to_save.empty else ""
-    new_type = df_to_save.iloc[-1]['Data Type'] if not df_to_save.empty else ""
-
     for attempt in range(max_retries):
         res = requests.get(url, headers=headers)
         sha = None
-        current_db = pd.DataFrame()
         
         if res.status_code == 200:
             file_info = res.json()
             sha = file_info.get("sha")
-            download_url = file_info["download_url"]
-            file_res = requests.get(download_url)
-            current_db = pd.read_excel(io.BytesIO(file_res.content))
             
-        if not current_db.empty:
-            target_condition = (
-                (current_db['Player Name'] == new_player) & 
-                (current_db['Date'] == new_date) & 
-                (current_db['Data Type'] == new_type)
-            )
-            modified_db = current_db[~target_condition]
-            
-            just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
-                                       (df_to_save['Date'] == new_date) & 
-                                       (df_to_save['Data Type'] == new_type)]
-            final_df = pd.concat([modified_db, just_new_data], ignore_index=True)
-        else:
+        # 削除処理の場合はそのまま引数のdf_to_saveを保存、追加処理の場合は上書き条件チェックを行う
+        if is_delete_operation:
             final_df = df_to_save
+        else:
+            current_db = pd.DataFrame()
+            if res.status_code == 200:
+                download_url = file_info["download_url"]
+                file_res = requests.get(download_url)
+                current_db = pd.read_excel(io.BytesIO(file_res.content))
+                
+            if not current_db.empty and not df_to_save.empty:
+                new_player = df_to_save.iloc[-1]['Player Name']
+                new_date = df_to_save.iloc[-1]['Date']
+                new_type = df_to_save.iloc[-1]['Data Type']
+                
+                target_condition = (
+                    (current_db['Player Name'] == new_player) & 
+                    (current_db['Date'] == new_date) & 
+                    (current_db['Data Type'] == new_type)
+                )
+                modified_db = current_db[~target_condition]
+                
+                just_new_data = df_to_save[(df_to_save['Player Name'] == new_player) & 
+                                           (df_to_save['Date'] == new_date) & 
+                                           (df_to_save['Data Type'] == new_type)]
+                final_df = pd.concat([modified_db, just_new_data], ignore_index=True)
+            else:
+                final_df = df_to_save
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -203,23 +209,22 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    col_reg1, col_reg2, col_reg3 = st.columns(3)
-    with col_reg1:
-        target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
-    with col_reg2:
-        target_date = st.date_input("対象の日付を選択", date.today(), key="pitch_reg_d")
-    with col_reg3:
-        data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
-    
-    st.divider()
-    
     manage_mode = st.radio("操作を選択してください", ["📥 新しいデータを登録（追加）", "🗑️ 登録済みデータを削除"], horizontal=True)
     
     if "登録" in manage_mode:
         st.subheader("📥 投球データのアップロード")
+        
+        col_reg1, col_reg2, col_reg3 = st.columns(3)
+        with col_reg1:
+            target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
+        with col_reg2:
+            target_date = st.date_input("対象の日付を選択", date.today(), key="pitch_reg_d")
+        with col_reg3:
+            data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
+        
         data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True)
         uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
-
+        
         if uploaded_file is not None:
             if st.button("🚀 投球データをGitHubへ保存", key="btn_save_pitch", use_container_width=True):
                 with st.spinner("データを処理してGitHubへ同期保存中..."):
@@ -235,7 +240,7 @@ with tab2:
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
                             uploaded_file.seek(0)
                             new_df = pd.read_excel(uploaded_file, skiprows=skip)
-
+                            
                         new_df = new_df.rename(columns=COLUMN_MAP)
                         new_df['Player Name'] = target_player
                         new_df['Date'] = target_date.strftime('%Y-%m-%d')
@@ -246,7 +251,7 @@ with tab2:
                         for c in cols_to_num:
                             if c in new_df.columns:
                                 new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
-
+                        
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
                             target_condition = (
@@ -258,7 +263,7 @@ with tab2:
                             updated_db = pd.concat([modified_db, new_df], ignore_index=True)
                         else:
                             updated_db = new_df
-
+                            
                         success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
                         if success:
                             st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
@@ -270,35 +275,122 @@ with tab2:
 
     else:
         st.subheader("🗑️ 登録済みデータの削除")
-        st.warning(f"現在、上の選択欄で「{target_player}」の「{target_date.strftime('%Y-%m-%d')}」における「{data_type}」が選択されています。")
-        confirm_delete = st.checkbox("上記に間違いがなければ、ここにチェックを入れてください。")
         
-        if st.button("🚨 選択したデータを完全に削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
-            with st.spinner("GitHub上のデータベースから削除中..."):
-                try:
-                    latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
-                    if latest_db.empty:
-                        st.error("❌ データベースにデータが存在しないか、読み込めないため削除できません。")
-                    else:
-                        target_condition = (
-                            (latest_db['Player Name'] == target_player) & 
-                            (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
-                            (latest_db['Data Type'] == data_type)
-                        )
-                        match_count = len(latest_db[target_condition])
-                        
-                        if match_count == 0:
-                            st.info(f"ℹ️ 指定された条件に一致するデータは登録されていません。")
-                        else:
-                            updated_db = latest_db[~target_condition]
-                            success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH)
-                            if success:
-                                st.success(f"💥 {target_player} の {target_date.strftime('%Y-%m-%d')} [{data_type}] のデータを完全に削除しました。")
-                            else:
-                                st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
-                except Exception as e:
-                    st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
+        # GitHubから最新データをロード
+        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+        
+        if latest_db.empty:
+            st.info("現在、データベースに削除可能なデータが登録されていません。")
+        else:
+            # データの安全な処理用にDateカラム等を整形
+            latest_db['Date'] = latest_db['Date'].astype(str)
+            if 'Data Source' not in latest_db.columns:
+                latest_db['Data Source'] = "不明/標準"
+            else:
+                latest_db['Data Source'] = latest_db['Data Source'].fillna("不明/標準")
 
+            # 選手一覧を取得
+            registered_players = sorted(latest_db['Player Name'].dropna().unique())
+            
+            col_del1, col_del2 = st.columns(2)
+            with col_del1:
+                del_player = st.selectbox("1. 削除対象の選手を選択", registered_players, key="del_player_select")
+            
+            # 選択された選手のデータのみ抽出
+            player_db = latest_db[latest_db['Player Name'] == del_player]
+            
+            # 登録済みの（日付、練習種別、データ元）グループを作成
+            group_cols = ['Date', 'Data Type', 'Data Source']
+            existing_groups = player_db.groupby(group_cols).size().reset_index(name='投球数')
+            
+            if existing_groups.empty:
+                st.warning("選択した選手のデータが見つかりませんでした。")
+            else:
+                # ユーザーがわかりやすい表示用ラベルを作成
+                group_options = []
+                for idx, row in existing_groups.iterrows():
+                    label = f"📅 {row['Date']} | 🏷️ {row['Data Type']} | ⚙️ {row['Data Source']} ({row['投球数']}球)"
+                    group_options.append(label)
+                
+                with col_del2:
+                    selected_group_label = st.selectbox("2. 削除対象のセッション（日付・種別）を選択", group_options, key="del_group_select")
+                
+                # 選択されたラベルから条件を逆引き
+                selected_idx = group_options.index(selected_group_label)
+                target_row = existing_groups.iloc[selected_idx]
+                
+                sel_date = target_row['Date']
+                sel_type = target_row['Data Type']
+                sel_source = target_row['Data Source']
+                
+                # 該当するセッションのデータを抽出
+                session_mask = (
+                    (latest_db['Player Name'] == del_player) & 
+                    (latest_db['Date'] == sel_date) & 
+                    (latest_db['Data Type'] == sel_type) & 
+                    (latest_db['Data Source'] == sel_source)
+                )
+                session_df = latest_db[session_mask]
+                
+                st.divider()
+                st.markdown("#### 🎯 削除オプションの設定")
+                
+                del_scope = st.radio(
+                    "削除範囲を選択してください", 
+                    ["このセッションのデータをすべて削除", "特定の球種のみ削除", "選択した1球（行）のみ削除"],
+                    horizontal=True
+                )
+                
+                rows_to_delete_mask = None
+                
+                if del_scope == "このセッションのデータをすべて削除":
+                    rows_to_delete_mask = session_mask
+                    st.warning(f"⚠️ {del_player} の 【{sel_date} | {sel_type} | {sel_source}】 のデータ全 {len(session_df)} 件が削除対象です。")
+                
+                elif del_scope == "特定の球種のみ削除":
+                    if 'Pitch Type' in session_df.columns:
+                        avail_pitch_types = sorted(session_df['Pitch Type'].dropna().unique())
+                        target_pitch_type = st.selectbox("削除する球種を選択", avail_pitch_types)
+                        
+                        rows_to_delete_mask = session_mask & (latest_db['Pitch Type'] == target_pitch_type)
+                        delete_count = len(latest_db[rows_to_delete_mask])
+                        st.warning(f"⚠️ {del_player} の 【{sel_date} | {sel_type}】 から 「{target_pitch_type}」（計 {delete_count} 件）を削除します。")
+                    else:
+                        st.error("データに球種(Pitch Type)のカラムが存在しません。")
+                
+                elif del_scope == "選択した1球（行）のみ削除":
+                    st.write("▼ 削除する特定の1球を選択してください")
+                    preview_display = session_df.reset_index()
+                    display_cols = [c for c in ['index', 'Pitch Type', 'Velocity', 'Spin Rate', 'VB', 'HB'] if c in preview_display.columns]
+                    
+                    selected_index = st.selectbox(
+                        "削除対象のデータ行（Index）を選択", 
+                        options=preview_display['index'].tolist(),
+                        format_func=lambda x: f"行ID: {x} - {preview_display.loc[preview_display['index']==x, 'Pitch Type'].values[0] if 'Pitch Type' in preview_display.columns else ''} ({preview_display.loc[preview_display['index']==x, 'Velocity'].values[0] if 'Velocity' in preview_display.columns else ''} km/h)"
+                    )
+                    
+                    rows_to_delete_mask = latest_db.index == selected_index
+                    st.warning(f"⚠️ 行ID: {selected_index} の1球データを削除します。")
+
+                # 削除確認と実行ボタン
+                if rows_to_delete_mask is not None:
+                    st.write("---")
+                    confirm_delete = st.checkbox("上記の内容を確認し、削除に同意します。")
+                    
+                    if st.button("🚨 選択したデータを削除する", key="btn_delete_pitch", disabled=not confirm_delete, type="primary", use_container_width=True):
+                        with st.spinner("GitHub上のデータベースから削除中..."):
+                            try:
+                                # 対象データを削除した最新DFを作成
+                                updated_db = latest_db[~rows_to_delete_mask]
+                                
+                                success, message = save_to_github_with_retry(updated_db, GITHUB_PITCH_FILE_PATH, is_delete_operation=True)
+                                if success:
+                                    st.success("💥 データの削除が正常に完了しました！")
+                                    st.rerun()  # 画面を更新して最新化
+                                else:
+                                    st.error(f"❌ GitHubのデータ更新に失敗しました: {message}")
+                            except Exception as e:
+                                st.error(f"❌ 削除処理中にエラーが発生しました: {e}")
 
 # ==========================================
 # タブ1：分析フィードバック
@@ -315,7 +407,7 @@ with tab1:
             df_all['Data Source'] = "Trackman（トラックマン）"
         else:
             df_all['Data Source'] = df_all['Data Source'].fillna("Trackman（トラックマン）")
-
+            
         available_players = sorted(df_all['Player Name'].dropna().unique())
         
         sel_c1, sel_c2, sel_c3, sel_c4 = st.columns(4)
@@ -337,7 +429,7 @@ with tab1:
             target_year = current_year
             min_data_date = today
             max_data_date = today
-
+            
         period_options = ["全体", "今日", "今週", "今月"]
         for m in range(1, 12 + 1):
             period_options.append(f"{m}月")
@@ -376,7 +468,7 @@ with tab1:
                     start_date, end_date = custom_range
                 elif isinstance(custom_range, date):
                     start_date, end_date = custom_range, custom_range
-
+                    
         with sel_c3:
             view_type = st.selectbox("練習種別フィルター", ["両方（すべて表示）", "ブルペンのみ", "シートBTのみ"], key="pitch_view_type")
         with sel_c4:
@@ -396,11 +488,10 @@ with tab1:
                 df = df[df['Data Source'].astype(str).str.contains("Rapsodo")]
         else:
             df = pd.DataFrame()
-
+            
         if not df.empty:
             hand = PLAYER_HANDS.get(p_name, "右")
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity'
-
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
@@ -419,15 +510,12 @@ with tab1:
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
                 st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
-
                 st.divider()
                 st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
-
                 hover_items = ['Data Type', c_vel]
                 if 'Data Source' in df.columns:
                     hover_items.append('Data Source')
-
                 with plot_col1:
                     st.write("▼ 全投球プロット")
                     fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=hover_items)
@@ -435,7 +523,6 @@ with tab1:
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_all, use_container_width=False)
-
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
@@ -446,7 +533,6 @@ with tab1:
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
-
                 # --- 3Dスピンビジュアライザー ---
                 st.divider()
                 st.subheader("⚾️ 3D軌道")
@@ -463,69 +549,67 @@ with tab1:
                     tilt_deg = time_to_degrees(avg_tilt_str)
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
-                # 3D回転座標計算
-            t = np.linspace(0, 2 * np.pi, 200)
-            alpha = 0.4
-            sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
-            base_pts = np.vstack([sx, sz, sy]).T 
-            
-            tilt_rad = np.deg2rad(tilt_deg)
-            rot_y = np.array([[np.cos(tilt_rad), 0, -np.sin(tilt_rad)], [0, 1, 0], [np.sin(tilt_rad), 0, np.cos(tilt_rad)]])
-            gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-            g_sign = -1 if hand == "右" else 1
-            rot_gyro = np.array([[1, 0, 0], [0, np.cos(gyro_rad), g_sign*np.sin(gyro_rad)], [0, -g_sign*np.sin(gyro_rad), np.cos(gyro_rad)]])
-            
-            combined_rot = rot_y @ rot_gyro
-            axis = combined_rot @ np.array([0.0, 0.0, 1.0])
-            seam_points = (base_pts @ combined_rot.T).tolist()
-            multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
-
-            # HTML生成
-            seam_json = json.dumps(seam_points)
-            axis_json = json.dumps(axis.tolist())
-            
-            html_code = f"""
-            <div id="ball_canvas" style="width:100%; height:600px;"></div>
-            <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-            <script>
-                (function() {{
-                    var points = {seam_json};
-                    var axis = {axis_json};
-                    var rpm = {avg_rpm};
-                    var mult = {multiplier};
-                    var cur_angle = 0;
-
-                    function rotate(p, ax, a) {{
-                        var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
-                        return [
-                            p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
-                            p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
-                            p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
-                        ];
-                    }}
-
-                    var data = [
-                        {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 15}} }},
-                        {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 5}} }}
-                    ];
-                    var layout = {{
-                        scene: {{ xaxis: {{visible:false}}, yaxis: {{visible:false}}, zaxis: {{visible:false}}, aspectmode:'cube', camera: {{eye: {{x:1.5, y:1.5, z:1.5}} }} }},
-                        margin: {{l:0, r:0, b:0, t:0}}
-                    }};
-                    Plotly.newPlot('ball_canvas', data, layout, {{responsive: true}});
-
-                    function animate() {{
-                        cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 60;
-                        var rx = [], ry = [], rz = [];
-                        for(var i=0; i<points.length; i++) {{
-                            var r = rotate(points[i], axis, cur_angle);
-                            rx.push(r[0]); ry.push(r[1]); rz.push(r[2]);
-                        }}
-                        Plotly.restyle('ball_canvas', {{x: [rx, null], y: [ry, null], z: [rz, null]}}, [0]);
-                        requestAnimationFrame(animate);
-                    }}
-                    animate();
-                }})();
-            </script>
-            """
-            st.components.v1.html(html_code, height=600)
+                    
+                    # 3D回転座標計算
+                    t = np.linspace(0, 2 * np.pi, 200)
+                    alpha = 0.4
+                    sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
+                    base_pts = np.vstack([sx, sz, sy]).T 
+                    
+                    tilt_rad = np.deg2rad(tilt_deg)
+                    rot_y = np.array([[np.cos(tilt_rad), 0, -np.sin(tilt_rad)], [0, 1, 0], [np.sin(tilt_rad), 0, np.cos(tilt_rad)]])
+                    gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
+                    g_sign = -1 if hand == "右" else 1
+                    rot_gyro = np.array([[1, 0, 0], [0, np.cos(gyro_rad), g_sign*np.sin(gyro_rad)], [0, -g_sign*np.sin(gyro_rad), np.cos(gyro_rad)]])
+                    
+                    combined_rot = rot_y @ rot_gyro
+                    axis = combined_rot @ np.array([0.0, 0.0, 1.0])
+                    seam_points = (base_pts @ combined_rot.T).tolist()
+                    multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
+                    
+                    # HTML生成
+                    seam_json = json.dumps(seam_points)
+                    axis_json = json.dumps(axis.tolist())
+                    
+                    html_code = f"""
+                    <div id="ball_canvas" style="width:100%; height:600px;"></div>
+                    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+                    <script>
+                        (function() {{
+                            var points = {seam_json};
+                            var axis = {axis_json};
+                            var rpm = {avg_rpm};
+                            var mult = {multiplier};
+                            var cur_angle = 0;
+                            function rotate(p, ax, a) {{
+                                var c = Math.cos(a), s = Math.sin(a), u = ax[0], v = ax[1], w = ax[2];
+                                return [
+                                    p[0]*(c+u*u*(1-c)) + p[1]*(u*v*(1-c)-w*s) + p[2]*(u*w*(1-c)+v*s),
+                                    p[0]*(v*u*(1-c)+w*s) + p[1]*(c+v*v*(1-c)) + p[2]*(v*w*(1-c)-u*s),
+                                    p[0]*(w*u*(1-c)-v*s) + p[1]*(w*v*(1-c)+u*s) + p[2]*(c+w*w*(1-c))
+                                ];
+                            }}
+                            var data = [
+                                {{ type: 'scatter3d', mode: 'lines', x: [], y: [], z: [], line: {{color: '#BC1010', width: 15}} }},
+                                {{ type: 'scatter3d', mode: 'lines', x: [axis[0]*-1.5, axis[0]*1.5], y: [axis[1]*-1.5, axis[1]*1.5], z: [axis[2]*-1.5, axis[2]*1.5], line: {{color: '#333', width: 5}} }}
+                            ];
+                            var layout = {{
+                                scene: {{ xaxis: {{visible:false}}, yaxis: {{visible:false}}, zaxis: {{visible:false}}, aspectmode:'cube', camera: {{eye: {{x:1.5, y:1.5, z:1.5}} }} }},
+                                margin: {{l:0, r:0, b:0, t:0}}
+                            }};
+                            Plotly.newPlot('ball_canvas', data, layout, {{responsive: true}});
+                            function animate() {{
+                                cur_angle -= mult * (rpm / 60) * (2 * Math.PI) / 60;
+                                var rx = [], ry = [], rz = [];
+                                for(var i=0; i<points.length; i++) {{
+                                    var r = rotate(points[i], axis, cur_angle);
+                                    rx.push(r[0]); ry.push(r[1]); rz.push(r[2]);
+                                }}
+                                Plotly.restyle('ball_canvas', {{x: [rx, null], y: [ry, null], z: [rz, null]}}, [0]);
+                                requestAnimationFrame(animate);
+                            }}
+                            animate();
+                        }})();
+                    </script>
+                    """
+                    st.components.v1.html(html_code, height=600)
