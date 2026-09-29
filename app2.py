@@ -174,7 +174,6 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    # 完全に明確な画面分岐を設定
     op_mode = st.radio(
         "行う操作を選択してください",
         ["📥 新規データの追加登録", "🗑️ 登録済みデータの選択削除"],
@@ -230,7 +229,6 @@ with tab2:
                         
                         latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
                         if not latest_db.empty:
-                            # 同日・同選手の既存データを置き換えて結合
                             target_condition = (
                                 (latest_db['Player Name'] == target_player) & 
                                 (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
@@ -256,44 +254,34 @@ with tab2:
     else:
         st.subheader("🗑️ 登録済みデータの選択・完全削除")
         
-        # 画面切り替え時に最新のデータを必ず再読み込み
         db_df = load_data_from_github(GITHUB_PITCH_FILE_PATH)
         
         if db_df.empty:
             st.warning("現在、データベースに登録済みのデータが見つかりません。")
         else:
-            # 必須カラムの補正
             db_df['Date'] = db_df['Date'].astype(str)
             if 'Data Source' not in db_df.columns:
                 db_df['Data Source'] = "標準"
             else:
                 db_df['Data Source'] = db_df['Data Source'].fillna("標準")
                 
-            # 登録選手一覧を取得
             registered_players = sorted(db_df['Player Name'].dropna().unique().tolist())
             
-            # Step 1: 選手の選択
             del_selected_player = st.selectbox("1. 削除対象の選手を選択してください", registered_players, key="del_p_select")
-            
-            # 選択された選手のデータのみフィルタリング
             player_records = db_df[db_df['Player Name'] == del_selected_player]
             
-            # 該当選手が登録しているセッション（日付・練習種別・計測機器）のユニーク一覧を作成
             group_keys = ['Date', 'Data Type', 'Data Source']
             sessions = player_records.groupby(group_keys).size().reset_index(name='投球数')
             
             if sessions.empty:
                 st.info(f"ℹ️ {del_selected_player} の登録データはありません。")
             else:
-                # ドロップダウン用のわかりやすい文字列リストの作成
                 session_options = []
                 for idx, r in sessions.iterrows():
                     session_options.append(f"{r['Date']} | {r['Data Type']} | {r['Data Source']} ({r['投球数']}球)")
                 
-                # Step 2: 対象データのセッションを選択
                 del_selected_session = st.selectbox("2. 削除するデータ項目を選択してください", session_options, key="del_s_select")
                 
-                # 選択されたセッション条件の抽出
                 sel_idx = session_options.index(del_selected_session)
                 target_session = sessions.iloc[sel_idx]
                 
@@ -301,7 +289,6 @@ with tab2:
                 s_type = target_session['Data Type']
                 s_source = target_session['Data Source']
                 
-                # 削除対象となる行のマスク条件
                 delete_target_mask = (
                     (db_df['Player Name'] == del_selected_player) & 
                     (db_df['Date'] == s_date) & 
@@ -311,7 +298,6 @@ with tab2:
                 
                 target_df = db_df[delete_target_mask]
                 
-                # Step 3: 削除の範囲オプション選択
                 st.markdown("---")
                 st.subheader("🎯 削除の細かさを指定")
                 
@@ -351,7 +337,6 @@ with tab2:
                     final_delete_mask = (db_df.index == selected_row_idx)
                     st.error(f"🚨 **削除内容確認**: ID {selected_row_idx} の1球データのみ削除します。")
 
-                # Step 4: プレビュー表示と削除ボタン
                 st.markdown("---")
                 st.write("▼ 削除対象となるデータのプレビュー")
                 st.dataframe(db_df[final_delete_mask][['Player Name', 'Date', 'Data Type', 'Pitch Type', 'Velocity']].head(10), use_container_width=True)
@@ -361,7 +346,6 @@ with tab2:
                 if st.button("🚨 このデータを完全に削除する", key="btn_execute_delete", disabled=not confirm_check, type="primary", use_container_width=True):
                     with st.spinner("GitHub上のデータベースから削除を実行中..."):
                         try:
-                            # 対象データを抽出から除外して保存
                             cleaned_db = db_df[~final_delete_mask]
                             
                             success, msg = save_to_github_direct(cleaned_db, GITHUB_PITCH_FILE_PATH, f"Delete pitch data: {del_selected_player}")
@@ -369,7 +353,7 @@ with tab2:
                             if success:
                                 st.success("🎉 データの削除が正常に完了しました！")
                                 time.sleep(1)
-                                st.rerun()  # 画面を再描画
+                                st.rerun()
                             else:
                                 st.error(f"❌ 削除データの保存に失敗しました: {msg}")
                         except Exception as ex:
@@ -473,6 +457,9 @@ with tab1:
             df = pd.DataFrame()
             
         if not df.empty:
+            # 💡 グラフでホバー時に「ID (行番号)」を表示できるように元のindexをID列として設定
+            df['ID'] = df.index
+            
             hand = PLAYER_HANDS.get(p_name, "右")
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity'
             if 'Pitch Type' in df.columns:
@@ -496,12 +483,24 @@ with tab1:
                 st.divider()
                 st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
-                hover_items = ['Data Type', c_vel]
+                
+                # 💡 ホバー時の表示項目に ID を追加
+                hover_items = ['ID', 'Date', 'Data Type', c_vel]
                 if 'Data Source' in df.columns:
                     hover_items.append('Data Source')
+                    
                 with plot_col1:
                     st.write("▼ 全投球プロット")
-                    fig_all = px.scatter(df, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH, hover_data=hover_items)
+                    fig_all = px.scatter(
+                        df, 
+                        x=c_hb, 
+                        y=c_vb, 
+                        color='Pitch Type', 
+                        range_x=[-60, 60], 
+                        range_y=[-60, 60], 
+                        color_discrete_map=COLOR_MAP_PITCH, 
+                        hover_data=hover_items
+                    )
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
