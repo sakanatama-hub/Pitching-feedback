@@ -544,11 +544,11 @@ with tab1:
                 # 2. 左投手のRelSide（池村等）は絶対値（正の値）に変換して「身体中心からの距離」を全投手共通で平均計算
                 df_team_calc['RelSide_abs'] = df_team_calc[c_rs].abs()
                 
-                team_avg_rh = df_team_calc[c_rh].mean()
-                team_abs_rs = df_team_calc['RelSide_abs'].mean()
+                team_avg_rh = float(df_team_calc[c_rh].mean())
+                team_abs_rs = float(df_team_calc['RelSide_abs'].mean())
                 
                 # 3. グラフ表示時、対象選手が左投手（ヴァデルナ・池村等）の場合は符号をマイナスに反転
-                team_display_rs = team_abs_rs if is_right_hand else -team_abs_rs
+                team_display_rs = float(team_abs_rs if is_right_hand else -team_abs_rs)
             else:
                 team_avg_rh, team_display_rs = None, None
 
@@ -613,7 +613,6 @@ with tab1:
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
                 
                 if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
-                    # 💡 横3並び用のカラム分割
                     rel_col1, rel_col2, rel_col3 = st.columns(3)
                     
                     hover_items_rel = ['ID', 'Date', 'Data Type', c_vel, c_rh, c_rs]
@@ -699,7 +698,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 💡 新機能：球種別リリース範囲（ばらつきの円・楕円表示）
+                    # 3. 球種別リリース範囲（ばらつきの円・楕円表示）
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -721,24 +720,24 @@ with tab1:
                         valid_rel_df = df.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
-                        # 球種ごとにばらつき（楕円）を計算
+                        # 球種ごとにばらつき（円・楕円）を計算
                         for pt, group in valid_rel_df.groupby('Pitch Type'):
                             if len(group) >= 1:
-                                mean_x = group[c_rs].mean()
-                                mean_y = group[c_rh].mean()
+                                mean_x = float(group[c_rs].mean())
+                                mean_y = float(group[c_rh].mean())
                                 
                                 # 投球数に応じて半径・ばらつき幅（標準偏差ベース）を設定
                                 std_x = group[c_rs].std() if len(group) > 1 else 0.03
                                 std_y = group[c_rh].std() if len(group) > 1 else 0.03
                                 
-                                rx = max(std_x * 1.8, 0.035) if not np.isnan(std_x) else 0.035
-                                ry = max(std_y * 1.8, 0.035) if not np.isnan(std_y) else 0.035
+                                rx = float(max(std_x * 1.8, 0.035) if not np.isnan(std_x) else 0.035)
+                                ry = float(max(std_y * 1.8, 0.035) if not np.isnan(std_y) else 0.035)
                                 
                                 color = COLOR_MAP_PITCH.get(pt, "gray")
                                 
-                                # 楕円（ばらつき範囲）の追加
+                                # Plotlyの指定名 `circle` を使用（楕円描画可能）
                                 shapes_list.append(dict(
-                                    type="ellipse",
+                                    type="circle",
                                     xref="x", yref="y",
                                     x0=mean_x - rx, y0=mean_y - ry,
                                     x1=mean_x + rx, y1=mean_y + ry,
