@@ -10,7 +10,6 @@ import io
 import requests
 import time  # 💡 同期待ちリトライ用
 import base64
-from PIL import Image, ImageOps
 
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム")
@@ -61,6 +60,10 @@ GITHUB_TOKEN = (
 # 💾 保存先をピッチング専用リポジトリに設定
 GITHUB_REPO = "sakanatama-hub/Pitching-feedback"  
 GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
+
+# 🖼️ GitHub上に保存したシルエット画像のRaw URLを設定
+# （GitHubにアップロード後、実際のURLに置き換えてください）
+SILHOUETTE_IMAGE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/data/release_silhouette.png"
 
 def load_data_from_github(file_path):
     """GitHubから投球データのExcelファイルを読み込む"""
@@ -172,50 +175,35 @@ def time_to_degrees(time_str):
     except:
         return 0.0
 
-def add_pitcher_background(fig, is_right_handed=True):
+def add_pitcher_url_background(fig, is_right_handed=True, img_url=SILHOUETTE_IMAGE_URL):
     """
-    【方法B】画像ファイル読み込み＋自動反転制御関数
-    「リリース.jpeg」があればそれを適用し、左右投手に合わせて反転処理を行います。
+    GitHub上の画像URLから背景画像を読み込み、Plotlyの背景に配置する関数
     """
-    img_path_candidates = ["リリース.jpeg", "リリース.jpg", "リリース.png"]
-    found_path = None
-    for p in img_path_candidates:
-        if os.path.exists(p):
-            found_path = p
-            break
+    try:
+        # 投手の利き腕に合わせて画像の配置座標を調整
+        if is_right_handed:
+            x_min, x_max = -0.1, 0.85
+        else:
+            x_min, x_max = -0.85, 0.1
+        y_min, y_max = 0.0, 2.1
 
-    if found_path:
-        try:
-            img = Image.open(found_path)
-            if not is_right_handed:
-                img = ImageOps.mirror(img)
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            img_src = f"data:image/png;base64,{img_b64}"
-
-            if is_right_handed:
-                x_min, x_max = -0.1, 0.85
-            else:
-                x_min, x_max = -0.85, 0.1
-            y_min, y_max = 0.0, 2.1
-
-            fig.add_layout_image(
-                dict(
-                    source=img_src,
-                    xref="x",
-                    yref="y",
-                    x=x_min,
-                    y=y_max,
-                    sizex=abs(x_max - x_min),
-                    sizey=abs(y_max - y_min),
-                    sizing="contain",
-                    opacity=0.6,
-                    layer="below"
-                )
+        fig.add_layout_image(
+            dict(
+                source=img_url,
+                xref="x",
+                yref="y",
+                x=x_min,
+                y=y_max,
+                sizex=abs(x_max - x_min),
+                sizey=abs(y_max - y_min),
+                sizing="contain",
+                opacity=0.6,
+                layer="below"
             )
-        except Exception as e:
-            pass
+        )
+    except Exception as e:
+        # 画像が取得できなくてもグラフ描画自体は破綻しないように保護
+        pass
 
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
@@ -604,7 +592,7 @@ with tab1:
                             hover_data=hover_items_rel
                         )
                         # 背景シルエット画像を適用
-                        add_pitcher_background(fig_rel_all, is_right_hand)
+                        add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
@@ -632,7 +620,7 @@ with tab1:
                             color_discrete_map=COLOR_MAP_PITCH
                         )
                         # 背景シルエット画像を適用
-                        add_pitcher_background(fig_rel_avg, is_right_hand)
+                        add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
