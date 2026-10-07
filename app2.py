@@ -203,19 +203,19 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 def add_pitcher_url_background(fig, is_right_handed=True):
     """
-    イラストの「手元（ボール）」の位置がチーム平均（高さ 1.80m / 左右 0.55m〜0.60m）に
-    ピッタリ合致するよう上下左右座標を精密修正
+    イラストのスケールを少し縮小し、手元（ボール）が高さ 1.80m 付近に来るよう
+    位置を低く精密調整
     """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
     if img_src:
         if is_right_handed:
-            x_min, x_max = -0.32, 1.08
+            x_min, x_max = -0.25, 0.95
         else:
-            x_min, x_max = -1.08, 0.32
+            x_min, x_max = -0.95, 0.25
             
-        # 手元（ボール）が高さ1.80m付近に来るよう y_min, y_max を下方シフトして調整
-        y_min, y_max = -0.65, 2.35
+        # y座標範囲を全体的に上にシフトすることで、イラスト手元の位置を低く調整（高さ約1.80mにピタッと合わせる）
+        y_min, y_max = -0.10, 2.15
 
         fig.add_layout_image(
             dict(
@@ -707,7 +707,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 💡 球種別リリース範囲（数値情報を凡例名の下に改行表示）
+                    # 3. 球種別リリース範囲
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -717,13 +717,11 @@ with tab1:
                         valid_rel_df = df.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
-                        # 球種ごとにばらつき（円・楕円）および幅の計算
                         for pt, group in valid_rel_df.groupby('Pitch Type'):
                             if len(group) >= 1:
                                 mean_x = float(group[c_rs].mean())
                                 mean_y = float(group[c_rh].mean())
                                 
-                                # 幅（cm換算）の計算：最大幅および標準偏差幅
                                 max_w_cm = (group[c_rs].max() - group[c_rs].min()) * 100
                                 max_h_cm = (group[c_rh].max() - group[c_rh].min()) * 100
                                 
@@ -735,7 +733,6 @@ with tab1:
                                 
                                 color = COLOR_MAP_PITCH.get(pt, "gray")
                                 
-                                # 円・楕円シェイプの追加
                                 shapes_list.append(dict(
                                     type="circle",
                                     xref="x", yref="y",
@@ -746,7 +743,6 @@ with tab1:
                                     line=dict(color=color, width=2)
                                 ))
                                 
-                                # 凡例（Legend）名の下に数値（改行 `<br>`）を追加
                                 legend_label = f"<b>{pt}</b><br>左右幅: {max_w_cm:.1f}cm<br>高さ幅: {max_h_cm:.1f}cm"
                                 
                                 fig_rel_range.add_trace(go.Scatter(
