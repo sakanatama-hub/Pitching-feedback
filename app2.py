@@ -57,7 +57,7 @@ GITHUB_TOKEN = (
 GITHUB_REPO = "sakanatama-hub/Pitching-feedback"  
 GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
-# 🖼️ 正しいRaw URLを指定（github.com/blob/ → raw.githubusercontent.com/ に変換）
+# 🖼️ シルエット画像のRaw URL
 SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
 
 def load_data_from_github(file_path):
@@ -167,7 +167,7 @@ def time_to_degrees(time_str):
 @st.cache_data(ttl=3600)
 def get_processed_silhouette_b64(is_right_handed=True):
     """
-    GitHubのRaw URLから画像を直接ダウンロードし、背景を透過・反転処理してBase64を返す関数
+    GitHubのRaw URLから画像を直接ダウンロードし、背景透過および「右投手の場合に反転」処理を行う関数
     """
     headers = {}
     if GITHUB_TOKEN:
@@ -184,15 +184,14 @@ def get_processed_silhouette_b64(is_right_handed=True):
         datas = img.getdata()
         newData = []
         for item in datas:
-            # 近い白色（RGB > 210）を透明化
             if item[0] > 210 and item[1] > 210 and item[2] > 210:
                 newData.append((255, 255, 255, 0))
             else:
                 newData.append(item)
         img.putdata(newData)
         
-        # 左投手の場合は画像を左右反転
-        if not is_right_handed:
+        # 💡 右投手の場合に画像を左右反転させる
+        if is_right_handed:
             img = ImageOps.mirror(img)
             
         buffered = io.BytesIO()
@@ -202,16 +201,19 @@ def get_processed_silhouette_b64(is_right_handed=True):
         return None
 
 def add_pitcher_url_background(fig, is_right_handed=True):
-    """背景にシルエットを正確な位置で追加する"""
+    """
+    (0,0)に足元（軸足・踏み込み足）が来て、手元（リリース）がデータ付近（高さ1.6m〜1.8m, 横0.5m付近）に重なるよう座標調整
+    """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
     if img_src:
-        # 右投手と左投手で足元（マウンド）の位置と伸ばした腕の範囲を調整
+        # 原点(0,0)に踏み込み足・身体の中心軸が来るように調整
         if is_right_handed:
-            x_min, x_max = -0.1, 0.85
+            x_min, x_max = -0.35, 0.95
         else:
-            x_min, x_max = -0.85, 0.1
-        y_min, y_max = 0.0, 2.1
+            x_min, x_max = -0.95, 0.35
+            
+        y_min, y_max = 0.0, 2.15
 
         fig.add_layout_image(
             dict(
@@ -223,8 +225,8 @@ def add_pitcher_url_background(fig, is_right_handed=True):
                 sizex=abs(x_max - x_min),
                 sizey=abs(y_max - y_min),
                 sizing="contain",
-                opacity=0.45,  # 濃さ（透過度）
-                layer="below"  # プロット点の下に敷く
+                opacity=0.5,  # シルエット透過度
+                layer="below"
             )
         )
 
@@ -583,7 +585,7 @@ with tab1:
 
                 # --- 📍 リリース位置プロット ---
                 st.divider()
-                st.subheader(f"📍 リリース位置（捕手目線 / {hand}投手）")
+                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
                 
                 if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2 = st.columns(2)
