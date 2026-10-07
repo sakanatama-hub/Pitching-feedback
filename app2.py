@@ -8,8 +8,9 @@ import re
 import os
 import io
 import requests
-import time  # 💡 同期待ちリトライ用
+import time
 import base64
+from PIL import Image, ImageOps
 
 # --- 1. ページ設定 ---
 st.set_page_config(layout="wide", page_title="投球解析システム")
@@ -22,11 +23,9 @@ def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     
-    # すでに認証済みの場合はTrueを返す
     if st.session_state["authenticated"]:
         return True
 
-    # 認証画面の表示
     st.title("🔒 投球解析システム - ログイン")
     
     with st.form("login_form"):
@@ -36,37 +35,32 @@ def check_password():
         if submit_button:
             if password_input == "1189":
                 st.session_state["authenticated"] = True
-                st.rerun()  # 画面を再描画してメインコンテンツへ
+                st.rerun()
             else:
                 st.error("❌ パスワードが間違っています。")
                 
     return False
 
-# パスワードチェックが通らない場合は、ここでアプリの実行をストップさせる
 if not check_password():
     st.stop()
 
 # ==========================================
-# 🚀 以下、認証成功時のみ実行されるメインロジック
+# 🚀 メインロジック
 # ==========================================
 
-# --- 2. トークン・リポジトリ設定（ピッチング専用に完全独立） ---
 GITHUB_TOKEN = (
     st.secrets.get("PITCHING_FEEDBACK") or 
     st.secrets.get("GITHUB_TOKEN") or 
     os.environ.get("GITHUB_TOKEN", "")
 )
 
-# 💾 保存先をピッチング専用リポジトリに設定
 GITHUB_REPO = "sakanatama-hub/Pitching-feedback"  
 GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
-# 🖼️ GitHub上に保存したシルエット画像のRaw URLを設定
-# （GitHubにアップロード後、実際のURLに置き換えてください）
-SILHOUETTE_IMAGE_URL = "https://github.com/sakanatama-hub/Pitching-feedback/blob/main/data/assets%3Arelease_silhouette.png"
+# 🖼️ 正しいRaw URLを指定（github.com/blob/ → raw.githubusercontent.com/ に変換）
+SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
 
 def load_data_from_github(file_path):
-    """GitHubから投球データのExcelファイルを読み込む"""
     if not GITHUB_TOKEN:
         st.error("【設定エラー】StreamlitのSecretsにトークンが設定されていないか、読み込めていません。")
         return pd.DataFrame()
@@ -87,9 +81,6 @@ def load_data_from_github(file_path):
         return pd.DataFrame()
 
 def save_to_github_direct(df_to_save, file_path, message_text="Update pitch data"):
-    """
-    データフレームをExcelデータに変換してGitHubへ直接上書き保存する関数
-    """
     if not GITHUB_TOKEN:
         return False, "Secretsにトークンが設定されていません。"
         
@@ -124,12 +115,10 @@ def save_to_github_direct(df_to_save, file_path, message_text="Update pitch data
     else:
         return False, put_res.json().get("message", "GitHubへの保存に失敗しました。")
 
-# --- アプリ起動時：GitHubから最新の投球データベースを読み込み ---
 if 'pitch_df' not in st.session_state:
     with st.spinner("GitHubから最新の投球データを読み込み中..."):
         st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
 
-# --- 3. 選手・カラー設定 ---
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
@@ -175,12 +164,49 @@ def time_to_degrees(time_str):
     except:
         return 0.0
 
-def add_pitcher_url_background(fig, is_right_handed=True, img_url=SILHOUETTE_IMAGE_URL):
+@st.cache_data(ttl=3600)
+def get_processed_silhouette_b64(is_right_handed=True):
     """
-    GitHub上の画像URLから背景画像を読み込み、Plotlyの背景に配置する関数
+    GitHubのRaw URLから画像を直接ダウンロードし、背景を透過・反転処理してBase64を返す関数
     """
+    headers = {}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
     try:
-        # 投手の利き腕に合わせて画像の配置座標を調整
+        r = requests.get(SILHOUETTE_IMAGE_URL, headers=headers, timeout=5)
+        if r.status_code != 200:
+            return None
+
+        img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        
+        # 白色の背景を透明化する処理
+        datas = img.getdata()
+        newData = []
+        for item in datas:
+            # 近い白色（RGB > 210）を透明化
+            if item[0] > 210 and item[1] > 210 and item[2] > 210:
+                newData.append((255, 255, 255, 0))
+            else:
+                newData.append(item)
+        img.putdata(newData)
+        
+        # 左投手の場合は画像を左右反転
+        if not is_right_handed:
+            img = ImageOps.mirror(img)
+            
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+    except Exception as e:
+        return None
+
+def add_pitcher_url_background(fig, is_right_handed=True):
+    """背景にシルエットを正確な位置で追加する"""
+    img_src = get_processed_silhouette_b64(is_right_handed)
+    
+    if img_src:
+        # 右投手と左投手で足元（マウンド）の位置と伸ばした腕の範囲を調整
         if is_right_handed:
             x_min, x_max = -0.1, 0.85
         else:
@@ -189,7 +215,7 @@ def add_pitcher_url_background(fig, is_right_handed=True, img_url=SILHOUETTE_IMA
 
         fig.add_layout_image(
             dict(
-                source=img_url,
+                source=img_src,
                 xref="x",
                 yref="y",
                 x=x_min,
@@ -197,13 +223,10 @@ def add_pitcher_url_background(fig, is_right_handed=True, img_url=SILHOUETTE_IMA
                 sizex=abs(x_max - x_min),
                 sizey=abs(y_max - y_min),
                 sizing="contain",
-                opacity=0.6,
-                layer="below"
+                opacity=0.45,  # 濃さ（透過度）
+                layer="below"  # プロット点の下に敷く
             )
         )
-    except Exception as e:
-        # 画像が取得できなくてもグラフ描画自体は破綻しないように保護
-        pass
 
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
@@ -223,9 +246,6 @@ with tab2:
     
     st.divider()
 
-    # ==========================================
-    # 分岐 1：新規データの追加登録
-    # ==========================================
     if op_mode == "📥 新規データの追加登録":
         st.subheader("📥 投球データのアップロード")
         
@@ -288,9 +308,6 @@ with tab2:
                     except Exception as e:
                         st.error(f"❌ 解析・保存エラー: {e}")
 
-    # ==========================================
-    # 分岐 2：登録済みデータの選択削除
-    # ==========================================
     else:
         st.subheader("🗑️ 登録済みデータの選択・完全削除")
         
@@ -591,7 +608,6 @@ with tab1:
                             color_discrete_map=COLOR_MAP_PITCH,
                             hover_data=hover_items_rel
                         )
-                        # 背景シルエット画像を適用
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
@@ -619,7 +635,6 @@ with tab1:
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH
                         )
-                        # 背景シルエット画像を適用
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
@@ -670,7 +685,6 @@ with tab1:
                     seam_points = (base_pts @ combined_rot.T).tolist()
                     multiplier = -1 if any(k in sel_type.lower() for k in ["cut", "slider", "sl", "curve"]) else 1
                     
-                    # HTML生成
                     seam_json = json.dumps(seam_points)
                     axis_json = json.dumps(axis.tolist())
                     
