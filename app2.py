@@ -600,8 +600,10 @@ with tab1:
                     st.write("▼ 球種別平均プロット")
                     plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
                     plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
-                    fig_avg = px.scatter(stats_df, x=plot_x, y=plot_y, color='Pitch Type', text='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
-                    fig_avg.update_traces(marker=dict(size=15), textposition='top center')
+                    
+                    # 💡 文字なしでマーカーのみ表示（テキストラベル削除）
+                    fig_avg = px.scatter(stats_df, x=plot_x, y=plot_y, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
+                    fig_avg.update_traces(marker=dict(size=15))
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
@@ -636,15 +638,13 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（左投手はマイナス反転表示）
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（文字削除）
                         if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_all.add_trace(go.Scatter(
                                 x=[team_display_rs],
                                 y=[team_avg_rh],
-                                mode='markers+text',
+                                mode='markers',
                                 name='チーム平均',
-                                text=['★ チーム平均'],
-                                textposition='top center',
                                 marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
                                 hoverinfo='text',
                                 hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
@@ -664,12 +664,13 @@ with tab1:
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
                         rel_stats = df.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                        
+                        # 💡 文字なしでマーカーのみ表示（テキストラベル削除）
                         fig_rel_avg = px.scatter(
                             rel_stats,
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
-                            text='Pitch Type',
                             range_x=x_range,
                             range_y=y_range,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
@@ -677,21 +678,19 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（左投手はマイナス反転表示）
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（文字削除）
                         if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_avg.add_trace(go.Scatter(
                                 x=[team_display_rs],
                                 y=[team_avg_rh],
-                                mode='markers+text',
+                                mode='markers',
                                 name='チーム平均',
-                                text=['★ チーム平均'],
-                                textposition='top center',
                                 marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
                                 hoverinfo='text',
                                 hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                             ))
                         
-                        fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
+                        fig_rel_avg.update_traces(marker=dict(size=15))
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(
