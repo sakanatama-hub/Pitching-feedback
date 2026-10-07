@@ -204,7 +204,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
 def add_pitcher_url_background(fig, is_right_handed=True):
     """
     イラストの手（ボール）の位置がチーム平均（高さ約1.51m、左右約0.56m）の
-    ★マークにピッタリ合致するよう座標を低く精密修正
+    ★マークにピッタリ合致するようイラスト位置を大きく下方修正
     """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
@@ -214,8 +214,8 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         else:
             x_min, x_max = -0.98, 0.42
             
-        # ボール位置をさらに下げるため y 座標を約0.39m上方へシフト
-        y_min, y_max = -0.13, 2.47
+        # y_max を 1.72 に指定することで、ボール位置を★マーク（高さ1.51m）に正確に配置
+        y_min, y_max = -0.88, 1.72
 
         fig.add_layout_image(
             dict(
