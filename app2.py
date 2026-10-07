@@ -529,21 +529,28 @@ with tab1:
             
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
             
-            # 💡 チーム全投手のリリース位置平均の算出（同利き腕の投手で算出）
-            df_all_calc = df_all.copy()
+            # ==========================================
+            # 💡 チーム全投手のリリース平均ポイント（符号調整＆ヴァデルナ除外）の計算
+            # ==========================================
+            df_team_calc = df_all.copy()
             for c in [c_rh, c_rs]:
-                if c in df_all_calc.columns:
-                    df_all_calc[c] = pd.to_numeric(df_all_calc[c].astype(str).str.replace('%', ''), errors='coerce')
+                if c in df_team_calc.columns:
+                    df_team_calc[c] = pd.to_numeric(df_team_calc[c].astype(str).str.replace('%', ''), errors='coerce')
             
-            # 同利き腕の投手データに絞り込んでチーム平均を計算
-            same_hand_players = [p for p, h in PLAYER_HANDS.items() if h == hand]
-            team_hand_df = df_all_calc[df_all_calc['Player Name'].isin(same_hand_players)].dropna(subset=[c_rh, c_rs])
+            # 1. ヴァデルナ選手を平均算出から除外
+            df_team_calc = df_team_calc[~df_team_calc['Player Name'].astype(str).str.contains("ヴァデルナ")].dropna(subset=[c_rh, c_rs])
             
-            if not team_hand_df.empty:
-                team_avg_rh = team_hand_df[c_rh].mean()
-                team_avg_rs = team_hand_df[c_rs].mean()
+            if not df_team_calc.empty:
+                # 2. 左投手のRelSide（池村等）は絶対値（正の値）に変換して「身体中心からの距離」を全投手共通で平均計算
+                df_team_calc['RelSide_abs'] = df_team_calc[c_rs].abs()
+                
+                team_avg_rh = df_team_calc[c_rh].mean()
+                team_abs_rs = df_team_calc['RelSide_abs'].mean()
+                
+                # 3. グラフ表示時、対象選手が左投手（ヴァデルナ・池村等）の場合は符号をマイナスに反転
+                team_display_rs = team_abs_rs if is_right_hand else -team_abs_rs
             else:
-                team_avg_rh, team_avg_rs = None, None
+                team_avg_rh, team_display_rs = None, None
 
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
@@ -629,18 +636,18 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）を追加
-                        if team_avg_rs is not None and team_avg_rh is not None:
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（左投手はマイナス反転表示）
+                        if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_all.add_trace(go.Scatter(
-                                x=[team_avg_rs],
+                                x=[team_display_rs],
                                 y=[team_avg_rh],
                                 mode='markers+text',
-                                name=f'チーム{hand}投手平均',
+                                name='チーム平均',
                                 text=['★ チーム平均'],
                                 textposition='top center',
                                 marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
                                 hoverinfo='text',
-                                hovertext=f"チーム{hand}投手平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_avg_rs:.2f}m"
+                                hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                             ))
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
@@ -670,18 +677,18 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）を追加
-                        if team_avg_rs is not None and team_avg_rh is not None:
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（左投手はマイナス反転表示）
+                        if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_avg.add_trace(go.Scatter(
-                                x=[team_avg_rs],
+                                x=[team_display_rs],
                                 y=[team_avg_rh],
                                 mode='markers+text',
-                                name=f'チーム{hand}投手平均',
+                                name='チーム平均',
                                 text=['★ チーム平均'],
                                 textposition='top center',
                                 marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
                                 hoverinfo='text',
-                                hovertext=f"チーム{hand}投手平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_avg_rs:.2f}m"
+                                hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                             ))
                         
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
