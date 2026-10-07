@@ -204,7 +204,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
 def add_pitcher_url_background(fig, is_right_handed=True):
     """
     イラストの手（ボール）の位置がチーム平均（高さ約1.51m、左右約0.56m）の
-    ★マークにピッタリ合致するようイラスト位置を大きく下方修正
+    ★マークにピッタリ合致するようイラスト位置を調整
     """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
@@ -214,7 +214,6 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         else:
             x_min, x_max = -0.98, 0.42
             
-        # y_max を 1.72 に指定することで、ボール位置を★マーク（高さ1.51m）に正確に配置
         y_min, y_max = -0.88, 1.72
 
         fig.add_layout_image(
@@ -364,7 +363,7 @@ with tab2:
                 
                 del_scope = st.radio(
                     "削除の範囲を選択してください",
-                    ["選択したセッションの全データを一括削除", "指定した球種のみ削除", "特定の1球を選んで削除"],
+                    ["選択したセッションの全データを一括削除", "指定した球種のみ削除", "特定の球を複数選んで削除 (複数選択可)"],
                     key="del_scope_option"
                 )
                 
@@ -384,19 +383,29 @@ with tab2:
                     else:
                         st.warning("球種データが見つからないため一括削除を行います。")
 
-                elif del_scope == "特定の1球を選んで削除":
+                elif del_scope == "特定の球を複数選んで削除 (複数選択可)":
                     preview_df = target_df.reset_index()
                     
                     row_options = preview_df['index'].tolist()
                     def format_row(row_idx):
                         r = preview_df[preview_df['index'] == row_idx].iloc[0]
-                        pt = r['Pitch Type'] if 'Pitch Type' in r else '不明'
-                        vel = f"{r['Velocity']} km/h" if 'Velocity' in r else ''
+                        pt = r['Pitch Type'] if 'Pitch Type' in r and pd.notna(r['Pitch Type']) else '不明'
+                        vel = f"{r['Velocity']} km/h" if 'Velocity' in r and pd.notna(r['Velocity']) else ''
                         return f"ID:{row_idx} - 球種:{pt} {vel}"
 
-                    selected_row_idx = st.selectbox("削除する1球（行）を選択", row_options, format_func=format_row, key="del_row_select")
-                    final_delete_mask = (db_df.index == selected_row_idx)
-                    st.error(f"🚨 **削除内容確認**: ID {selected_row_idx} の1球データのみ削除します。")
+                    selected_row_indices = st.multiselect(
+                        "削除したい球（1球または複数球）を選択してください",
+                        options=row_options,
+                        format_func=format_row,
+                        key="del_rows_multiselect"
+                    )
+                    
+                    if selected_row_indices:
+                        final_delete_mask = db_df.index.isin(selected_row_indices)
+                        st.error(f"🚨 **削除内容確認**: 選択された {len(selected_row_indices)} 件の投球データを削除します。")
+                    else:
+                        final_delete_mask = pd.Series(False, index=db_df.index)
+                        st.info("💡 上記の選択ボックスから削除したい球を選択してください。")
 
                 st.markdown("---")
                 st.write("▼ 削除対象となるデータのプレビュー")
@@ -404,7 +413,7 @@ with tab2:
                 
                 confirm_check = st.checkbox("上記データを削除することを確認しました", key="del_final_check")
                 
-                if st.button("🚨 このデータを完全に削除する", key="btn_execute_delete", disabled=not confirm_check, type="primary", use_container_width=True):
+                if st.button("🚨 このデータを完全に削除する", key="btn_execute_delete", disabled=(not confirm_check or not final_delete_mask.any()), type="primary", use_container_width=True):
                     with st.spinner("GitHub上のデータベースから削除を実行中..."):
                         try:
                             cleaned_db = db_df[~final_delete_mask]
