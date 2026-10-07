@@ -172,53 +172,50 @@ def time_to_degrees(time_str):
     except:
         return 0.0
 
-def add_pitcher_base64_background(fig, is_right_handed=True):
+def add_pitcher_background(fig, is_right_handed=True):
     """
-    【方法B】ローカル画像なしで動作する埋め込み画像背景生成関数
-    ご提示いただいた投手のリリースシルエット画像を内蔵し、左右投げに合わせて描画
+    【方法B】画像ファイル読み込み＋自動反転制御関数
+    「リリース.jpeg」があればそれを適用し、左右投手に合わせて反転処理を行います。
     """
-    # ローカルに「リリース.jpeg」があれば読み込み、なければ埋め込みBase64を使用するフォールバック構造
-    img_b64_str = None
-    if os.path.exists("リリース.jpeg"):
+    img_path_candidates = ["リリース.jpeg", "リリース.jpg", "リリース.png"]
+    found_path = None
+    for p in img_path_candidates:
+        if os.path.exists(p):
+            found_path = p
+            break
+
+    if found_path:
         try:
-            img = Image.open("リリース.jpeg")
+            img = Image.open(found_path)
             if not is_right_handed:
                 img = ImageOps.mirror(img)
             buffered = io.BytesIO()
             img.save(buffered, format="PNG")
-            img_b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        except:
+            img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            img_src = f"data:image/png;base64,{img_b64}"
+
+            if is_right_handed:
+                x_min, x_max = -0.1, 0.85
+            else:
+                x_min, x_max = -0.85, 0.1
+            y_min, y_max = 0.0, 2.1
+
+            fig.add_layout_image(
+                dict(
+                    source=img_src,
+                    xref="x",
+                    yref="y",
+                    x=x_min,
+                    y=y_max,
+                    sizex=abs(x_max - x_min),
+                    sizey=abs(y_max - y_min),
+                    sizing="contain",
+                    opacity=0.6,
+                    layer="below"
+                )
+            )
+        except Exception as e:
             pass
-
-    if img_b64_str is None:
-        # ご提示いただいた画像のBase64変換用（ファイルが存在する場合は上記で自動取得）
-        # ※ファイルがない場合でも背景を正常化するため透明PNGをフォールバックとして保持
-        img_b64_str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-
-    img_src = f"data:image/png;base64,{img_b64_str}"
-    
-    # 投手の足元が(0,0)に配置され、マウンドと手元が自然に収まる座標範囲設定
-    if is_right_handed:
-        x_min, x_max = -0.1, 0.85
-    else:
-        x_min, x_max = -0.85, 0.1
-        
-    y_min, y_max = 0.0, 2.1
-
-    fig.add_layout_image(
-        dict(
-            source=img_src,
-            xref="x",
-            yref="y",
-            x=x_min,
-            y=y_max,
-            sizex=abs(x_max - x_min),
-            sizey=abs(y_max - y_min),
-            sizing="contain",
-            opacity=0.6,
-            layer="below"
-        )
-    )
 
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
@@ -579,7 +576,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット（方法B: 画像自動埋め込み背景） ---
+                # --- 📍 リリース位置プロット ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（捕手目線 / {hand}投手）")
                 
@@ -606,8 +603,8 @@ with tab1:
                             color_discrete_map=COLOR_MAP_PITCH,
                             hover_data=hover_items_rel
                         )
-                        # 【方法B】背景画像の自動配置
-                        add_pitcher_base64_background(fig_rel_all, is_right_hand)
+                        # 背景シルエット画像を適用
+                        add_pitcher_background(fig_rel_all, is_right_hand)
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
@@ -634,8 +631,8 @@ with tab1:
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH
                         )
-                        # 【方法B】背景画像の自動配置
-                        add_pitcher_base64_background(fig_rel_avg, is_right_hand)
+                        # 背景シルエット画像を適用
+                        add_pitcher_background(fig_rel_avg, is_right_hand)
                         
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
