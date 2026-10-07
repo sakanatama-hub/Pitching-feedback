@@ -153,7 +153,13 @@ COLUMN_MAP = {
     'Spin Direction': 'Spin Direction',
     'VB (trajectory)': 'VB',
     'HB (trajectory)': 'HB',
-    'Velocity': 'Velocity'
+    'Velocity': 'Velocity',
+    'RelHeight': 'RelHeight',
+    'RelSide': 'RelSide',
+    'Release Height': 'RelHeight',
+    'Release Side': 'RelSide',
+    'Release Height (release)': 'RelHeight',
+    'Release Side (release)': 'RelSide'
 }
 
 def time_to_degrees(time_str):
@@ -222,7 +228,7 @@ with tab2:
                         new_df['Data Type'] = data_type
                         new_df['Data Source'] = data_source
                         
-                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity']
+                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide']
                         for c in cols_to_num:
                             if c in new_df.columns:
                                 new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
@@ -460,13 +466,20 @@ with tab1:
             # 💡 グラフでホバー時に「ID (行番号)」を表示できるように元のindexをID列として設定
             df['ID'] = df.index
             
+            # 数値データの型を適用
+            cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide']
+            for c in cols_to_num:
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
+
             hand = PLAYER_HANDS.get(p_name, "右")
-            c_dir, c_rev, c_eff, c_vb, c_hb, c_vel = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity'
+            c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
+            
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
                 agg_dict = {}
-                for c in [c_vel, c_rev, c_eff, c_vb, c_hb]:
+                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs]:
                     if c in df.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
@@ -476,15 +489,16 @@ with tab1:
                 rename_dict = {
                     f"{c_vel}_mean": "平均球速", f"{c_vel}_max": "最高球速",
                     f"{c_rev}_mean": "平均回転数", f"{c_eff}_mean": "回転効率 (%)",
-                    f"{c_vb}_mean": "縦変化量 (VB)", f"{c_hb}_mean": "横変化量 (HB)"
+                    f"{c_vb}_mean": "縦変化量 (VB)", f"{c_hb}_mean": "横変化量 (HB)",
+                    f"{c_rh}_mean": "リリース高さ (m)", f"{c_rs}_mean": "リリース横位置 (m)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
-                st.dataframe(stats_df.style.format(precision=1), use_container_width=True)
+                st.dataframe(stats_df.style.format(precision=2), use_container_width=True)
+                
                 st.divider()
                 st.subheader("📈 変化量マップ")
                 plot_col1, plot_col2 = st.columns(2)
                 
-                # 💡 ホバー時の表示項目に ID を追加
                 hover_items = ['ID', 'Date', 'Data Type', c_vel]
                 if 'Data Source' in df.columns:
                     hover_items.append('Data Source')
@@ -515,6 +529,70 @@ with tab1:
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
+
+                # --- 📍 リリース位置プロット ---
+                st.divider()
+                st.subheader("📍 リリース位置（リリースポイント）")
+                
+                if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
+                    rel_col1, rel_col2 = st.columns(2)
+                    
+                    hover_items_rel = ['ID', 'Date', 'Data Type', c_vel, c_rh, c_rs]
+                    if 'Data Source' in df.columns:
+                        hover_items_rel.append('Data Source')
+                        
+                    with rel_col1:
+                        st.write("▼ 全投球リリース位置")
+                        fig_rel_all = px.scatter(
+                            df.dropna(subset=[c_rh, c_rs]),
+                            x=c_rs,
+                            y=c_rh,
+                            color='Pitch Type',
+                            range_x=[-1.5, 1.5],
+                            range_y=[0.0, 2.5],
+                            labels={c_rs: 'リリース横位置 (m)', c_rh: 'リリース高さ (m)'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            hover_data=hover_items_rel
+                        )
+                        fig_rel_all.add_hline(y=0, line_width=2, line_color="black") # 地面 0m
+                        fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray") # プレート中心 0m
+                        fig_rel_all.update_layout(
+                            plot_bgcolor='white', 
+                            width=550, 
+                            height=550, 
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), 
+                            xaxis=dict(gridcolor='lightgray')
+                        )
+                        st.plotly_chart(fig_rel_all, use_container_width=False)
+                        
+                    with rel_col2:
+                        st.write("▼ 球種別平均リリース位置")
+                        rel_stats = df.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                        fig_rel_avg = px.scatter(
+                            rel_stats,
+                            x=c_rs,
+                            y=c_rh,
+                            color='Pitch Type',
+                            text='Pitch Type',
+                            range_x=[-1.5, 1.5],
+                            range_y=[0.0, 2.5],
+                            labels={c_rs: 'リリース横位置 (m)', c_rh: 'リリース高さ (m)'},
+                            color_discrete_map=COLOR_MAP_PITCH
+                        )
+                        fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
+                        fig_rel_avg.add_hline(y=0, line_width=2, line_color="black") # 地面 0m
+                        fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray") # プレート中心 0m
+                        fig_rel_avg.update_layout(
+                            plot_bgcolor='white', 
+                            width=550, 
+                            height=550, 
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), 
+                            xaxis=dict(gridcolor='lightgray')
+                        )
+                        st.plotly_chart(fig_rel_avg, use_container_width=False)
+                else:
+                    st.info("ℹ️ リリース位置データ（RelHeight / RelSide）が含まれていないか、有効な数値データが存在しません。")
+
                 # --- 3Dスピンビジュアライザー ---
                 st.divider()
                 st.subheader("⚾️ 3D軌道")
