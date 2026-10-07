@@ -203,18 +203,18 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 def add_pitcher_url_background(fig, is_right_handed=True):
     """
-    手元（ボール）の位置が実際のリリースデータ（高さ1.55m~1.65m, 横0.5m~0.6m）に
-    ぴったり重なるよう配置座標とサイズを調整
+    イラストの手（ボール）部分がチーム平均（高さ約1.8m、左右約0.55m）に
+    ぴったり合致するよう座標と拡大率を調整
     """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
     if img_src:
         if is_right_handed:
-            x_min, x_max = -0.32, 1.08
+            x_min, x_max = -0.36, 1.02
         else:
-            x_min, x_max = -1.08, 0.32
+            x_min, x_max = -1.02, 0.36
             
-        y_min, y_max = -0.35, 1.80
+        y_min, y_max = -0.20, 1.98
 
         fig.add_layout_image(
             dict(
@@ -530,24 +530,32 @@ with tab1:
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
             
             # ==========================================
-            # 💡 チーム全投手のリリース平均ポイント（符号調整＆ヴァデルナ除外）の計算
+            # 💡 2段階方式によるチーム平均の算出
+            # （①選手個人の全投球平均を算出 ➔ ②選手別平均の平均をとる）
             # ==========================================
             df_team_calc = df_all.copy()
             for c in [c_rh, c_rs]:
                 if c in df_team_calc.columns:
                     df_team_calc[c] = pd.to_numeric(df_team_calc[c].astype(str).str.replace('%', ''), errors='coerce')
             
-            # 1. ヴァデルナ選手を平均算出から除外
+            # ヴァデルナ選手を計算対象から除外
             df_team_calc = df_team_calc[~df_team_calc['Player Name'].astype(str).str.contains("ヴァデルナ")].dropna(subset=[c_rh, c_rs])
             
             if not df_team_calc.empty:
-                # 2. 左投手のRelSide（池村等）は絶対値（正の値）に変換して「身体中心からの距離」を全投手共通で平均計算
+                # 左投手のRelSide（池村等）は絶対値（正の値）に変換
                 df_team_calc['RelSide_abs'] = df_team_calc[c_rs].abs()
                 
-                team_avg_rh = float(df_team_calc[c_rh].mean())
-                team_abs_rs = float(df_team_calc['RelSide_abs'].mean())
+                # Step 1: 選手個人ごとに全投球の平均値を算出
+                player_means = df_team_calc.groupby('Player Name').agg({
+                    c_rh: 'mean',
+                    'RelSide_abs': 'mean'
+                }).reset_index()
                 
-                # 3. グラフ表示時、対象選手が左投手（ヴァデルナ・池村等）の場合は符号をマイナスに反転
+                # Step 2: 選手別平均値の平均をとってチーム平均とする
+                team_avg_rh = float(player_means[c_rh].mean())
+                team_abs_rs = float(player_means['RelSide_abs'].mean())
+                
+                # 対象選手の利き腕（左投手の場合はマイナス）に応じて表示座標を調整
                 team_display_rs = float(team_abs_rs if is_right_hand else -team_abs_rs)
             else:
                 team_avg_rh, team_display_rs = None, None
@@ -698,35 +706,22 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 球種別リリース範囲（ばらつきの円・楕円表示）
+                    # 3. 💡 球種別リリース範囲（プロットなし・純粋な範囲シェイプのみ表示）
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
                         
                         add_pitcher_url_background(fig_rel_range, is_right_hand)
-                        
-                        # チーム平均の表示（★マーク）
-                        if team_display_rs is not None and team_avg_rh is not None:
-                            fig_rel_range.add_trace(go.Scatter(
-                                x=[team_display_rs],
-                                y=[team_avg_rh],
-                                mode='markers',
-                                name='チーム平均',
-                                marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
-                                hoverinfo='text',
-                                hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
-                            ))
 
                         valid_rel_df = df.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
-                        # 球種ごとにばらつき（円・楕円）を計算
+                        # 球種ごとにばらつき（円・楕円シェイプ）を計算して追加
                         for pt, group in valid_rel_df.groupby('Pitch Type'):
                             if len(group) >= 1:
                                 mean_x = float(group[c_rs].mean())
                                 mean_y = float(group[c_rh].mean())
                                 
-                                # 投球数に応じて半径・ばらつき幅（標準偏差ベース）を設定
                                 std_x = group[c_rs].std() if len(group) > 1 else 0.03
                                 std_y = group[c_rh].std() if len(group) > 1 else 0.03
                                 
@@ -735,26 +730,23 @@ with tab1:
                                 
                                 color = COLOR_MAP_PITCH.get(pt, "gray")
                                 
-                                # Plotlyの指定名 `circle` を使用（楕円描画可能）
+                                # 円・楕円シェイプの追加（プロット点は描画しない）
                                 shapes_list.append(dict(
                                     type="circle",
                                     xref="x", yref="y",
                                     x0=mean_x - rx, y0=mean_y - ry,
                                     x1=mean_x + rx, y1=mean_y + ry,
                                     fillcolor=color,
-                                    opacity=0.3,
+                                    opacity=0.35,
                                     line=dict(color=color, width=2)
                                 ))
                                 
-                                # 各球種の中央点プロット
+                                # 凡例（Legend）に球種カラーを表示するため透明なダミートレースを追加
                                 fig_rel_range.add_trace(go.Scatter(
-                                    x=[mean_x],
-                                    y=[mean_y],
+                                    x=[None], y=[None],
                                     mode='markers',
                                     name=pt,
-                                    marker=dict(size=12, color=color, line=dict(width=1, color='black')),
-                                    hoverinfo='text',
-                                    hovertext=f"球種: {pt}<br>平均高さ: {mean_y:.2f}m<br>平均左右: {mean_x:.2f}m<br>投球数: {len(group)}球"
+                                    marker=dict(size=10, color=color)
                                 ))
 
                         fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
