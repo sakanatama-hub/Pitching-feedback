@@ -601,7 +601,6 @@ with tab1:
                     plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
                     plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
                     
-                    # 💡 文字なしでマーカーのみ表示（テキストラベル削除）
                     fig_avg = px.scatter(stats_df, x=plot_x, y=plot_y, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
                     fig_avg.update_traces(marker=dict(size=15))
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
@@ -609,20 +608,22 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット ---
+                # --- 📍 リリース位置プロット（横3並びレイアウト） ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
                 
                 if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
-                    rel_col1, rel_col2 = st.columns(2)
+                    # 💡 横3並び用のカラム分割
+                    rel_col1, rel_col2, rel_col3 = st.columns(3)
                     
                     hover_items_rel = ['ID', 'Date', 'Data Type', c_vel, c_rh, c_rs]
                     if 'Data Source' in df.columns:
                         hover_items_rel.append('Data Source')
                         
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
-                    y_range = [1.0, 2.3]  # y軸は1.0m以上から表示
+                    y_range = [1.0, 2.3]
                     
+                    # 1. 全投球リリース位置
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -638,7 +639,6 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（文字削除）
                         if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_all.add_trace(go.Scatter(
                                 x=[team_display_rs],
@@ -654,18 +654,17 @@ with tab1:
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_all.update_layout(
                             plot_bgcolor='white', 
-                            width=550, 
-                            height=550, 
+                            height=480, 
                             yaxis=dict(gridcolor='lightgray', dtick=0.1), 
                             xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
-                        st.plotly_chart(fig_rel_all, use_container_width=False)
+                        st.plotly_chart(fig_rel_all, use_container_width=True)
                         
+                    # 2. 球種別平均リリース位置
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
                         rel_stats = df.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
                         
-                        # 💡 文字なしでマーカーのみ表示（テキストラベル削除）
                         fig_rel_avg = px.scatter(
                             rel_stats,
                             x=c_rs,
@@ -678,7 +677,6 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
-                        # 💡 チーム全投手のリリース平均ポイント（★マーク）の追加（文字削除）
                         if team_display_rs is not None and team_avg_rh is not None:
                             fig_rel_avg.add_trace(go.Scatter(
                                 x=[team_display_rs],
@@ -695,12 +693,81 @@ with tab1:
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(
                             plot_bgcolor='white', 
-                            width=550, 
-                            height=550, 
+                            height=480, 
                             yaxis=dict(gridcolor='lightgray', dtick=0.1), 
                             xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
-                        st.plotly_chart(fig_rel_avg, use_container_width=False)
+                        st.plotly_chart(fig_rel_avg, use_container_width=True)
+
+                    # 3. 💡 新機能：球種別リリース範囲（ばらつきの円・楕円表示）
+                    with rel_col3:
+                        st.write("▼ 球種別リリース範囲")
+                        fig_rel_range = go.Figure()
+                        
+                        add_pitcher_url_background(fig_rel_range, is_right_hand)
+                        
+                        # チーム平均の表示（★マーク）
+                        if team_display_rs is not None and team_avg_rh is not None:
+                            fig_rel_range.add_trace(go.Scatter(
+                                x=[team_display_rs],
+                                y=[team_avg_rh],
+                                mode='markers',
+                                name='チーム平均',
+                                marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
+                                hoverinfo='text',
+                                hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
+                            ))
+
+                        valid_rel_df = df.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
+                        shapes_list = []
+                        
+                        # 球種ごとにばらつき（楕円）を計算
+                        for pt, group in valid_rel_df.groupby('Pitch Type'):
+                            if len(group) >= 1:
+                                mean_x = group[c_rs].mean()
+                                mean_y = group[c_rh].mean()
+                                
+                                # 投球数に応じて半径・ばらつき幅（標準偏差ベース）を設定
+                                std_x = group[c_rs].std() if len(group) > 1 else 0.03
+                                std_y = group[c_rh].std() if len(group) > 1 else 0.03
+                                
+                                rx = max(std_x * 1.8, 0.035) if not np.isnan(std_x) else 0.035
+                                ry = max(std_y * 1.8, 0.035) if not np.isnan(std_y) else 0.035
+                                
+                                color = COLOR_MAP_PITCH.get(pt, "gray")
+                                
+                                # 楕円（ばらつき範囲）の追加
+                                shapes_list.append(dict(
+                                    type="ellipse",
+                                    xref="x", yref="y",
+                                    x0=mean_x - rx, y0=mean_y - ry,
+                                    x1=mean_x + rx, y1=mean_y + ry,
+                                    fillcolor=color,
+                                    opacity=0.3,
+                                    line=dict(color=color, width=2)
+                                ))
+                                
+                                # 各球種の中央点プロット
+                                fig_rel_range.add_trace(go.Scatter(
+                                    x=[mean_x],
+                                    y=[mean_y],
+                                    mode='markers',
+                                    name=pt,
+                                    marker=dict(size=12, color=color, line=dict(width=1, color='black')),
+                                    hoverinfo='text',
+                                    hovertext=f"球種: {pt}<br>平均高さ: {mean_y:.2f}m<br>平均左右: {mean_x:.2f}m<br>投球数: {len(group)}球"
+                                ))
+
+                        fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
+                        fig_rel_range.add_vline(x=0, line_dash="dash", line_color="gray")
+                        fig_rel_range.update_layout(
+                            plot_bgcolor='white', 
+                            height=480, 
+                            shapes=shapes_list,
+                            xaxis=dict(range=x_range, gridcolor='lightgray', dtick=0.2, title='左右 [m]'), 
+                            yaxis=dict(range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
+                        )
+                        st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
                     st.info("ℹ️ リリース位置データ（RelHeight / RelSide）が含まれていないか、有効な数値データが存在しません。")
 
