@@ -130,7 +130,7 @@ PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
     "#17 加藤 泰靖": "右", "#18 市川 祐": "右", "#19 高尾 響": "右", 
-    "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "右", "#30 平野 大智": "右"
+    "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "左", "#30 平野 大智": "右"
 }
 
 COLOR_MAP_PITCH = {
@@ -170,6 +170,52 @@ def time_to_degrees(time_str):
         return ((hh % 12) * 60 + mm) * 0.5
     except:
         return 0.0
+
+def add_pitcher_silhouette(fig, is_right_handed=True):
+    """(0,0)の原点に足が配置される投手の簡易シルエットを追加する関数"""
+    sign = 1 if is_right_handed else -1
+    
+    # 頭部 (頭の位置)
+    head_x = 0.15 * sign
+    head_y = 1.70
+    fig.add_shape(
+        type="circle",
+        x0=head_x - 0.09, y0=head_y - 0.09,
+        x1=head_x + 0.09, y1=head_y + 0.09,
+        fillcolor="black", line_color="black", opacity=0.85
+    )
+    
+    # 胴体・腕・脚（踏み込み足が(0,0)付近に来るシルエットパス）
+    # 右投手/左投手で左右反転
+    path_d = f"""
+    M 0 0
+    L {0.12 * sign} 0
+    L {0.20 * sign} 0.8
+    L {0.45 * sign} 1.55
+    L {0.28 * sign} 1.58
+    L {0.22 * sign} 1.35
+    L {0.08 * sign} 0.85
+    Z
+    """
+    fig.add_shape(
+        type="path",
+        path=path_d,
+        fillcolor="black", line_color="black", opacity=0.85
+    )
+    
+    # 投げ腕（リリース方向へ伸びる腕）
+    arm_path = f"""
+    M {0.20 * sign} 1.45
+    L {0.55 * sign} 1.75
+    L {0.48 * sign} 1.82
+    L {0.16 * sign} 1.52
+    Z
+    """
+    fig.add_shape(
+        type="path",
+        path=arm_path,
+        fillcolor="black", line_color="black", opacity=0.85
+    )
 
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
@@ -463,16 +509,16 @@ with tab1:
             df = pd.DataFrame()
             
         if not df.empty:
-            # 💡 グラフでホバー時に「ID (行番号)」を表示できるように元のindexをID列として設定
             df['ID'] = df.index
             
-            # 数値データの型を適用
             cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide']
             for c in cols_to_num:
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
 
             hand = PLAYER_HANDS.get(p_name, "右")
+            is_right_hand = (hand == "右")
+            
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
             
             if 'Pitch Type' in df.columns:
@@ -530,9 +576,9 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット ---
+                # --- 📍 リリース位置プロット（シルエット＆軸調整付き） ---
                 st.divider()
-                st.subheader("📍 リリース位置（リリースポイント）")
+                st.subheader(f"📍 リリース位置（捕手目線 / {hand}投手）")
                 
                 if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2 = st.columns(2)
@@ -541,6 +587,10 @@ with tab1:
                     if 'Data Source' in df.columns:
                         hover_items_rel.append('Data Source')
                         
+                    # 左右の投手に合わせてx軸の表示範囲を設定（右投手: 0 ~ 1.2m, 左投手: -1.2 ~ 0m）
+                    x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
+                    y_range = [1.0, 2.3]  # y軸は1.0m以上から表示
+                    
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -548,20 +598,21 @@ with tab1:
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
-                            range_x=[-1.5, 1.5],
-                            range_y=[0.0, 2.5],
-                            labels={c_rs: 'リリース横位置 (m)', c_rh: 'リリース高さ (m)'},
+                            range_x=x_range,
+                            range_y=y_range,
+                            labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             hover_data=hover_items_rel
                         )
-                        fig_rel_all.add_hline(y=0, line_width=2, line_color="black") # 地面 0m
-                        fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray") # プレート中心 0m
+                        add_pitcher_silhouette(fig_rel_all, is_right_hand)
+                        fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
+                        fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_all.update_layout(
                             plot_bgcolor='white', 
                             width=550, 
                             height=550, 
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), 
-                            xaxis=dict(gridcolor='lightgray')
+                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
+                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
                         st.plotly_chart(fig_rel_all, use_container_width=False)
                         
@@ -574,20 +625,21 @@ with tab1:
                             y=c_rh,
                             color='Pitch Type',
                             text='Pitch Type',
-                            range_x=[-1.5, 1.5],
-                            range_y=[0.0, 2.5],
-                            labels={c_rs: 'リリース横位置 (m)', c_rh: 'リリース高さ (m)'},
+                            range_x=x_range,
+                            range_y=y_range,
+                            labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH
                         )
+                        add_pitcher_silhouette(fig_rel_avg, is_right_hand)
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
-                        fig_rel_avg.add_hline(y=0, line_width=2, line_color="black") # 地面 0m
-                        fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray") # プレート中心 0m
+                        fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
+                        fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(
                             plot_bgcolor='white', 
                             width=550, 
                             height=550, 
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), 
-                            xaxis=dict(gridcolor='lightgray')
+                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
+                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=False)
                 else:
@@ -619,7 +671,7 @@ with tab1:
                     tilt_rad = np.deg2rad(tilt_deg)
                     rot_y = np.array([[np.cos(tilt_rad), 0, -np.sin(tilt_rad)], [0, 1, 0], [np.sin(tilt_rad), 0, np.cos(tilt_rad)]])
                     gyro_rad = np.deg2rad((100 - avg_eff) * 0.9)
-                    g_sign = -1 if hand == "右" else 1
+                    g_sign = -1 if is_right_hand else 1
                     rot_gyro = np.array([[1, 0, 0], [0, np.cos(gyro_rad), g_sign*np.sin(gyro_rad)], [0, -g_sign*np.sin(gyro_rad), np.cos(gyro_rad)]])
                     
                     combined_rot = rot_y @ rot_gyro
