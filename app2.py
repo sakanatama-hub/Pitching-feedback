@@ -63,7 +63,7 @@ GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 # 🖼️ GitHub上に保存したシルエット画像のRaw URLを設定
 # （GitHubにアップロード後、実際のURLに置き換えてください）
-SILHOUETTE_IMAGE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/data/release_silhouette.png"
+SILHOUETTE_IMAGE_URL = "https://github.com/sakanatama-hub/Pitching-feedback/blob/main/data/assets%3Arelease_silhouette.png"
 
 def load_data_from_github(file_path):
     """GitHubから投球データのExcelファイルを読み込む"""
