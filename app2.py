@@ -190,7 +190,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
                 newData.append(item)
         img.putdata(newData)
         
-        # 💡 右投手の場合に画像を左右反転させる
+        # 右投手の場合に画像を左右反転させる
         if is_right_handed:
             img = ImageOps.mirror(img)
             
@@ -202,18 +202,18 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 def add_pitcher_url_background(fig, is_right_handed=True):
     """
-    (0,0)に足元（軸足・踏み込み足）が来て、手元（リリース）がデータ付近（高さ1.6m〜1.8m, 横0.5m付近）に重なるよう座標調整
+    手元（ボール）の位置が実際のリリースデータ（高さ1.55m~1.65m, 横0.5m~0.6m）に
+    ぴったり重なるよう配置座標とサイズを調整
     """
     img_src = get_processed_silhouette_b64(is_right_handed)
     
     if img_src:
-        # 原点(0,0)に踏み込み足・身体の中心軸が来るように調整
         if is_right_handed:
-            x_min, x_max = -0.35, 0.95
+            x_min, x_max = -0.32, 1.08
         else:
-            x_min, x_max = -0.95, 0.35
+            x_min, x_max = -1.08, 0.32
             
-        y_min, y_max = 0.0, 2.15
+        y_min, y_max = -0.35, 1.80
 
         fig.add_layout_image(
             dict(
@@ -224,8 +224,8 @@ def add_pitcher_url_background(fig, is_right_handed=True):
                 y=y_max,
                 sizex=abs(x_max - x_min),
                 sizey=abs(y_max - y_min),
-                sizing="contain",
-                opacity=0.5,  # シルエット透過度
+                sizing="stretch",
+                opacity=0.45,
                 layer="below"
             )
         )
