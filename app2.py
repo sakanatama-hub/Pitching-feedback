@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import date, timedelta
 import re
 import os
@@ -528,6 +529,22 @@ with tab1:
             
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
             
+            # 💡 チーム全投手のリリース位置平均の算出（同利き腕の投手で算出）
+            df_all_calc = df_all.copy()
+            for c in [c_rh, c_rs]:
+                if c in df_all_calc.columns:
+                    df_all_calc[c] = pd.to_numeric(df_all_calc[c].astype(str).str.replace('%', ''), errors='coerce')
+            
+            # 同利き腕の投手データに絞り込んでチーム平均を計算
+            same_hand_players = [p for p, h in PLAYER_HANDS.items() if h == hand]
+            team_hand_df = df_all_calc[df_all_calc['Player Name'].isin(same_hand_players)].dropna(subset=[c_rh, c_rs])
+            
+            if not team_hand_df.empty:
+                team_avg_rh = team_hand_df[c_rh].mean()
+                team_avg_rs = team_hand_df[c_rs].mean()
+            else:
+                team_avg_rh, team_avg_rs = None, None
+
             if 'Pitch Type' in df.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
@@ -612,6 +629,20 @@ with tab1:
                         )
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
                         
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）を追加
+                        if team_avg_rs is not None and team_avg_rh is not None:
+                            fig_rel_all.add_trace(go.Scatter(
+                                x=[team_avg_rs],
+                                y=[team_avg_rh],
+                                mode='markers+text',
+                                name=f'チーム{hand}投手平均',
+                                text=['★ チーム平均'],
+                                textposition='top center',
+                                marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
+                                hoverinfo='text',
+                                hovertext=f"チーム{hand}投手平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_avg_rs:.2f}m"
+                            ))
+                        
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_all.update_layout(
@@ -638,6 +669,20 @@ with tab1:
                             color_discrete_map=COLOR_MAP_PITCH
                         )
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
+                        
+                        # 💡 チーム全投手のリリース平均ポイント（★マーク）を追加
+                        if team_avg_rs is not None and team_avg_rh is not None:
+                            fig_rel_avg.add_trace(go.Scatter(
+                                x=[team_avg_rs],
+                                y=[team_avg_rh],
+                                mode='markers+text',
+                                name=f'チーム{hand}投手平均',
+                                text=['★ チーム平均'],
+                                textposition='top center',
+                                marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
+                                hoverinfo='text',
+                                hovertext=f"チーム{hand}投手平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_avg_rs:.2f}m"
+                            ))
                         
                         fig_rel_avg.update_traces(marker=dict(size=15), textposition='top center')
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
