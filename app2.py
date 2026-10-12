@@ -736,7 +736,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット（Trackman基準） ---
+                # --- 📍 リリース位置プロット（Trackman基準 / 1メモリの大きさ統一・アスペクト比固定） ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手 / Trackman基準）")
                 
@@ -782,7 +782,7 @@ with tab1:
                         fig_rel_all.update_layout(
                             plot_bgcolor='white', 
                             height=480, 
-                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.1), 
                             xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
                         st.plotly_chart(fig_rel_all, use_container_width=True)
@@ -821,7 +821,7 @@ with tab1:
                         fig_rel_avg.update_layout(
                             plot_bgcolor='white', 
                             height=480, 
-                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.1), 
                             xaxis=dict(gridcolor='lightgray', dtick=0.2)
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
@@ -881,13 +881,13 @@ with tab1:
                             height=480, 
                             shapes=shapes_list,
                             xaxis=dict(range=x_range, gridcolor='lightgray', dtick=0.2, title='左右 [m]'), 
-                            yaxis=dict(range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
+                            yaxis=dict(scaleanchor="x", scaleratio=1, range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
                         )
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション ---
+                # --- 📏 エクステンション分析セクション（ご指定のレイアウト構成＆アスペクト比固定） ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
@@ -895,7 +895,7 @@ with tab1:
                     ext_x_range = [0.0, 2.5]
                     ext_y_range = [0.0, 2.3]
                     
-                    # 上段：全球散布図 & 球種別平均散布図
+                    # 上段：全球散布図 & 球種別平均プロット（横並び）
                     ext_col1, ext_col2 = st.columns(2)
                     
                     hover_items_ext = ['ID', 'Date', 'Data Type', c_vel, c_ext, c_rh]
@@ -924,7 +924,7 @@ with tab1:
                             plot_bgcolor='white',
                             height=480,
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='高さ [m]')
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.5, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
@@ -955,7 +955,7 @@ with tab1:
                             plot_bgcolor='white',
                             height=480,
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='高さ [m]')
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.5, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True)
 
