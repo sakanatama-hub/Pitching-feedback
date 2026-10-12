@@ -248,7 +248,8 @@ def get_processed_extension_silhouette_b64():
         datas = img.getdata()
         newData = []
         for item in datas:
-            if item[0] > 210 and item[1] > 210 and item[2] > 210:
+            # 白・明るい背景領域を透過処理
+            if item[0] > 220 and item[1] > 220 and item[2] > 220:
                 newData.append((255, 255, 255, 0))
             else:
                 newData.append(item)
@@ -286,24 +287,23 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
-    """エクステンション分析グラフ用の背景画像配置（プレートのピクセル位置を原点(0,0)に正確に一致させるオフセット調整）"""
+    """エクステンション分析グラフ用の背景画像配置（プレート位置を原点0.0mにピタリと合わせる配置設定）"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        # プレート位置が画像の約 7.5% の位置にあると仮定し、xを -0.20m シフトして原点に合致させます
-        x_min, x_max = -0.20, 2.70
-        y_min, y_max = 0.0, 2.3
-
+        # イラスト内のプレートが x=0.0m, y=0.0m 付近に正しく配置されるよう正確な範囲とアンカーを指定
         fig.add_layout_image(
             dict(
                 source=img_src,
                 xref="x",
                 yref="y",
-                x=x_min,
-                y=y_max,
-                sizex=abs(x_max - x_min),
-                sizey=abs(y_max - y_min),
+                x=-0.23,
+                y=2.30,
+                sizex=2.90,
+                sizey=2.30,
+                xanchor="left",
+                yanchor="top",
                 sizing="stretch",
-                opacity=0.40,
+                opacity=0.45,
                 layer="below"
             )
         )
@@ -742,7 +742,7 @@ with tab1:
 
                 # --- 📍 リリース位置プロット（Trackman基準） ---
                 st.divider()
-                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手 / Trackman基準）")
+                st.subheader(f"📍 リリリース位置（投手目線 / {hand}投手 / Trackman基準）")
                 
                 if c_rh in df_pos_source.columns and c_rs in df_pos_source.columns and not df_pos_source[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2, rel_col3 = st.columns(3)
@@ -891,7 +891,7 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（原点＆イラスト位置調整完了） ---
+                # --- 📏 エクステンション分析セクション（レイアウト位置・アンカー正確化済み） ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
@@ -919,7 +919,8 @@ with tab1:
                             category_orders=category_orders_dict,
                             hover_data=hover_items_ext
                         )
-                        # プレート位置(0,0)にイラストのホームベースが重なるように調整した背景配置
+                        
+                        # プレートの位置(0,0)にピッタリ合致するように背景を重ね合わせ
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
