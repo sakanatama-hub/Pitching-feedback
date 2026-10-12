@@ -234,7 +234,6 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 @st.cache_data(ttl=3600)
 def get_processed_extension_silhouette_b64():
-    """エクステンション用の横向きシルエット画像の背景透過処理"""
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -286,11 +285,8 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
-    """エクステンション分析グラフ用の背景画像配置（イラストの横幅・高さをコンパクトに縮小し、プロット位置に正確に合致させる）"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        # sizex/sizeyを小さく設定してイラストを縮小
-        # x=-0.12, y=2.05, sizex=2.15, sizey=2.05 に設定することで手先が約1.7〜1.8mのプロット中心に収まります
         fig.add_layout_image(
             dict(
                 source=img_src,
@@ -891,12 +887,12 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（イラストのスケール縮小＆位置調整完了） ---
+                # --- 📏 エクステンション分析セクション（3分割：散布図・推移・球種別平均グラフ） ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
                 if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
-                    ext_col1, ext_col2 = st.columns(2)
+                    ext_col1, ext_col2, ext_col3 = st.columns(3)
                     
                     hover_items_ext = ['ID', 'Date', 'Data Type', c_vel, c_ext, c_rh]
                     if 'Data Source' in df_pos_source.columns:
@@ -906,7 +902,7 @@ with tab1:
                     ext_y_range = [0.0, 2.3]
                     
                     with ext_col1:
-                        st.write("▼ プレート起点のエクステンション × リリース高さ（全投球）")
+                        st.write("▼ エクステンション × リリース高さ")
                         fig_ext_scatter = px.scatter(
                             df_pos_source.dropna(subset=[c_ext, c_rh]),
                             x=c_ext,
@@ -914,13 +910,11 @@ with tab1:
                             color='Pitch Type',
                             range_x=ext_x_range,
                             range_y=ext_y_range,
-                            labels={c_ext: 'エクステンション（プレートからの距離） [m]', c_rh: 'リリース高さ [m]'},
+                            labels={c_ext: 'エクステンション [m]', c_rh: 'リリース高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict,
                             hover_data=hover_items_ext
                         )
-                        
-                        # コンパクトに縮小配置した背景イラスト
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
@@ -929,12 +923,12 @@ with tab1:
                             plot_bgcolor='white',
                             height=480,
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='リリース高さ [m]')
+                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
                     with ext_col2:
-                        st.write("▼ 投球順エクステンション推移 [m]")
+                        st.write("▼ 投球順エクステンション推移")
                         df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
                         df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
                         
@@ -962,6 +956,32 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                         )
                         st.plotly_chart(fig_ext_trend, use_container_width=True)
+
+                    with ext_col3:
+                        st.write("▼ 球種別平均エクステンション")
+                        ext_stats = df_pos_source.dropna(subset=[c_ext]).groupby('Pitch Type')[c_ext].mean().reset_index()
+                        ext_stats['sort_rank'] = ext_stats['Pitch Type'].apply(get_pitch_rank)
+                        ext_stats = ext_stats.sort_values(by=['sort_rank', 'Pitch Type'])
+                        
+                        fig_ext_bar = px.bar(
+                            ext_stats,
+                            x='Pitch Type',
+                            y=c_ext,
+                            color='Pitch Type',
+                            labels={'Pitch Type': '球種', c_ext: '平均エクステンション [m]'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict,
+                            text=ext_stats[c_ext].apply(lambda x: f"{x:.2f}m")
+                        )
+                        fig_ext_bar.update_traces(textposition='outside')
+                        fig_ext_bar.update_layout(
+                            plot_bgcolor='white',
+                            height=480,
+                            showlegend=False,
+                            yaxis=dict(gridcolor='lightgray', title='平均エクステンション [m]', range=[0, max(2.5, ext_stats[c_ext].max() * 1.15) if not ext_stats.empty else 2.5]),
+                            xaxis=dict(title='球種')
+                        )
+                        st.plotly_chart(fig_ext_bar, use_container_width=True)
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
 
