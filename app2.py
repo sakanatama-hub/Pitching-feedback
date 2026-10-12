@@ -283,12 +283,20 @@ with tab2:
                                 temp_df = pd.read_csv(uploaded_file, nrows=15, header=None, encoding='shift-jis')
                                 enc = 'shift-jis'
                                 
-                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            # 機器の種類（Trackman / Rapsodo）に応じてヘッダー行の検索キーワードを切り替え
+                            if "Rapsodo" in data_source:
+                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["No", "Pitch ID", "Pitch Type"])), 4)
+                            else:
+                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                                
                             uploaded_file.seek(0)
                             new_df = pd.read_csv(uploaded_file, skiprows=skip, encoding=enc)
                         else:
                             temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
-                            skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            if "Rapsodo" in data_source:
+                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["No", "Pitch ID", "Pitch Type"])), 4)
+                            else:
+                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
                             uploaded_file.seek(0)
                             new_df = pd.read_excel(uploaded_file, skiprows=skip)
                             
