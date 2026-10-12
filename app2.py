@@ -273,10 +273,19 @@ with tab2:
                     try:
                         file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                         if file_ext == '.csv':
-                            temp_df = pd.read_csv(uploaded_file, nrows=15, header=None)
+                            # エンコーディングの自動フォールバック対応
+                            try:
+                                uploaded_file.seek(0)
+                                temp_df = pd.read_csv(uploaded_file, nrows=15, header=None, encoding='utf-8')
+                                enc = 'utf-8'
+                            except UnicodeDecodeError:
+                                uploaded_file.seek(0)
+                                temp_df = pd.read_csv(uploaded_file, nrows=15, header=None, encoding='shift-jis')
+                                enc = 'shift-jis'
+                                
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
                             uploaded_file.seek(0)
-                            new_df = pd.read_csv(uploaded_file, skiprows=skip)
+                            new_df = pd.read_csv(uploaded_file, skiprows=skip, encoding=enc)
                         else:
                             temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
                             skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
@@ -779,14 +788,13 @@ with tab1:
                 else:
                     st.info("ℹ️ リリリース位置データ（RelHeight / RelSide）が含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 4. エクステンション（球持ち）分析セクション ---
+                # --- 📏 エクステンション（球持ち）分析セクション ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（球持ち / リリース前傾度）")
                 
                 if c_ext in df.columns and not df[c_ext].dropna().empty:
                     ext_col1, ext_col2 = st.columns(2)
                     
-                    # A. 球種別エクステンション分布（Box Plot）
                     with ext_col1:
                         st.write("▼ 球種別エクステンション分布 [m]")
                         fig_ext_box = px.box(
@@ -806,7 +814,6 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_box, use_container_width=True)
                         
-                    # B. 投球順エクステンション推移
                     with ext_col2:
                         st.write("▼ 投球順エクステンション推移 [m]")
                         df_ext_trend = df.dropna(subset=[c_ext]).copy().reset_index(drop=True)
