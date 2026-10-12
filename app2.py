@@ -750,6 +750,15 @@ with tab1:
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
                     y_range = [1.0, 2.3]
                     
+                    # 🎯 3つのグラフすべてでマージン（余白）と高さを完全に共通化し、枠の大きさを揃える
+                    common_release_layout = dict(
+                        plot_bgcolor='white',
+                        height=480,
+                        margin=dict(l=60, r=160, t=50, b=50), # 左右上下の余白（特に右側r）を統一
+                        yaxis=dict(gridcolor='lightgray', dtick=0.1, range=y_range, title='高さ [m]'),
+                        xaxis=dict(gridcolor='lightgray', dtick=0.2, range=x_range, title='左右 [m]')
+                    )
+                    
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -757,8 +766,6 @@ with tab1:
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
-                            range_x=x_range,
-                            range_y=y_range,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict,
@@ -779,12 +786,7 @@ with tab1:
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_all.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
-                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
-                        )
+                        fig_rel_all.update_layout(**common_release_layout)
                         st.plotly_chart(fig_rel_all, use_container_width=True)
                         
                     with rel_col2:
@@ -796,8 +798,6 @@ with tab1:
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
-                            range_x=x_range,
-                            range_y=y_range,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict
@@ -818,12 +818,7 @@ with tab1:
                         fig_rel_avg.update_traces(marker=dict(size=15))
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_avg.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            yaxis=dict(gridcolor='lightgray', dtick=0.1), 
-                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
-                        )
+                        fig_rel_avg.update_layout(**common_release_layout)
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
                     with rel_col3:
@@ -831,7 +826,6 @@ with tab1:
                         fig_rel_range = go.Figure()
                         
                         add_pitcher_url_background(fig_rel_range, is_right_hand)
-
                         valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
@@ -873,16 +867,14 @@ with tab1:
                                     name=legend_label,
                                     marker=dict(size=12, color=color)
                                 ))
-
+                        
                         fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_range.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_range.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            shapes=shapes_list,
-                            xaxis=dict(range=x_range, gridcolor='lightgray', dtick=0.2, title='左右 [m]'), 
-                            yaxis=dict(range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
-                        )
+                        
+                        # 3つ目のグラフにも同じ共通レイアウトを適用
+                        layout_args_range = common_release_layout.copy()
+                        layout_args_range['shapes'] = shapes_list
+                        fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
@@ -895,7 +887,6 @@ with tab1:
                     ext_x_range = [0.0, 2.5]
                     ext_y_range = [0.0, 2.3]
                     
-                    # 上段：全球散布図 & 球種別平均散布図
                     ext_col1, ext_col2 = st.columns(2)
                     
                     hover_items_ext = ['ID', 'Date', 'Data Type', c_vel, c_ext, c_rh]
@@ -959,7 +950,6 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True)
 
-                    # 下段：投球順エクステンション推移
                     st.write("▼ 投球順エクステンション推移 [m]")
                     df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
                     df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
