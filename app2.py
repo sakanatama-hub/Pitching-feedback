@@ -60,7 +60,7 @@ GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 # 🖼️ シルエット画像のRaw URL
 SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
-# 🖼️ エクステンション用横向きイラストのRaw URL
+# 🖼️ エクステンション用横向きイラストのRaw URL（正しく画像データを指すraw.githubusercontent.comに修正）
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
 def load_data_from_github(file_path):
@@ -234,7 +234,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 @st.cache_data(ttl=3600)
 def get_processed_extension_silhouette_b64():
-    """エクステンション用の横向きシルエット画像の背景透過処理"""
+    """エクステンション用の横向きシルエット画像の背景透過処理（Raw URLより取得）"""
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -248,6 +248,7 @@ def get_processed_extension_silhouette_b64():
         datas = img.getdata()
         newData = []
         for item in datas:
+            # 白背景（またはそれに近い明るいピクセル）を透明化
             if item[0] > 210 and item[1] > 210 and item[2] > 210:
                 newData.append((255, 255, 255, 0))
             else:
@@ -290,7 +291,7 @@ def add_extension_url_background(fig):
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
         x_min, x_max = 0.0, 2.5
-        y_min, y_max = 0.0, 2.2
+        y_min, y_max = 0.0, 2.3
 
         fig.add_layout_image(
             dict(
@@ -888,11 +889,11 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
-                    st.info("ℹ️ リリリース位置データが含まれていないか、有効な数値データが存在しません。")
+                    st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（(0,0)起点・原点軸表示） ---
+                # --- 📏 エクステンション分析セクション（(0,0)起点・横向きイラスト背景付き） ---
                 st.divider()
-                st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリリース高さ）")
+                st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
                 if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
                     ext_col1, ext_col2 = st.columns(2)
@@ -905,7 +906,7 @@ with tab1:
                     ext_y_range = [0.0, 2.3]
                     
                     with ext_col1:
-                        st.write("▼ プレート起点のエクステンション × リリリース高さ（全投球）")
+                        st.write("▼ プレート起点のエクステンション × リリース高さ（全投球）")
                         fig_ext_scatter = px.scatter(
                             df_pos_source.dropna(subset=[c_ext, c_rh]),
                             x=c_ext,
@@ -918,6 +919,7 @@ with tab1:
                             category_orders=category_orders_dict,
                             hover_data=hover_items_ext
                         )
+                        # 背景に横向き投球フォームイラストを配置
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
