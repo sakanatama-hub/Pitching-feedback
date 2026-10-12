@@ -748,13 +748,13 @@ with tab1:
                         hover_items_rel.append('Data Source')
                         
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
-                    y_range = [1.0, 2.3]
+                    y_range = [1.0, 2.2]  # 🎯 Y軸のmaxを2.2に変更
                     
-                    # 🎯 グラフの描画領域の余白（右側）をすっきりさせて幅を広げる
+                    # 🎯 高さを少し低く（横幅を広く感じさせるように調整）
                     common_release_layout = dict(
                         plot_bgcolor='white',
-                        height=480,
-                        margin=dict(l=50, r=80, t=40, b=40), # 右側の余白を狭めてグラフ幅を拡大
+                        height=400,
+                        margin=dict(l=40, r=60, t=30, b=30),
                         yaxis=dict(gridcolor='lightgray', dtick=0.1, range=y_range, title='高さ [m]'),
                         xaxis=dict(gridcolor='lightgray', dtick=0.2, range=x_range, title='左右 [m]')
                     )
@@ -884,7 +884,7 @@ with tab1:
                 
                 if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
                     ext_x_range = [0.0, 2.5]
-                    ext_y_range = [0.0, 2.3]
+                    ext_y_range = [0.0, 2.2]
                     
                     ext_col1, ext_col2 = st.columns(2)
                     
@@ -912,9 +912,9 @@ with tab1:
                         fig_ext_scatter.add_hline(y=0, line_width=2, line_color="black")
                         fig_ext_scatter.update_layout(
                             plot_bgcolor='white',
-                            height=480,
+                            height=400,
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='高さ [m]')
+                            yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
@@ -943,9 +943,9 @@ with tab1:
                         fig_ext_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_ext_avg.update_layout(
                             plot_bgcolor='white',
-                            height=480,
+                            height=400,
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='高さ [m]')
+                            yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True)
 
