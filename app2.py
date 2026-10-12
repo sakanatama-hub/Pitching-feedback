@@ -748,14 +748,14 @@ with tab1:
                         hover_items_rel.append('Data Source')
                         
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
-                    y_range = [1.0, 2.2]  # 🎯 Y軸のmaxを2.2に変更
+                    y_range = [1.0, 2.2]  # 🎯 Y軸のmaxを2.2に設定
                     
-                    # 🎯 高さを少し低く（横幅を広く感じさせるように調整）
+                    # 🎯 scaleanchor="x", scaleratio=1 を設定してX軸1mとY軸1mの長さを完全に統一
                     common_release_layout = dict(
                         plot_bgcolor='white',
                         height=400,
                         margin=dict(l=40, r=60, t=30, b=30),
-                        yaxis=dict(gridcolor='lightgray', dtick=0.1, range=y_range, title='高さ [m]'),
+                        yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.1, range=y_range, title='高さ [m]'),
                         xaxis=dict(gridcolor='lightgray', dtick=0.2, range=x_range, title='左右 [m]')
                     )
                     
