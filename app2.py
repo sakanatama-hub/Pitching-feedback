@@ -273,30 +273,31 @@ with tab2:
                     try:
                         file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                         if file_ext == '.csv':
-                            # エンコーディングの自動フォールバック対応
+                            # エンコーディングの自動判定・フォールバック
+                            bytes_data = uploaded_file.getvalue()
                             try:
-                                uploaded_file.seek(0)
-                                temp_df = pd.read_csv(uploaded_file, nrows=15, header=None, encoding='utf-8')
+                                text_data = bytes_data.decode('utf-8')
                                 enc = 'utf-8'
                             except UnicodeDecodeError:
-                                uploaded_file.seek(0)
-                                temp_df = pd.read_csv(uploaded_file, nrows=15, header=None, encoding='shift-jis')
+                                text_data = bytes_data.decode('shift-jis', errors='ignore')
                                 enc = 'shift-jis'
                                 
-                            # 機器の種類（Trackman / Rapsodo）に応じてヘッダー行の検索キーワードを切り替え
-                            if "Rapsodo" in data_source:
-                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["No", "Pitch ID", "Pitch Type"])), 4)
-                            else:
-                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
-                                
-                            uploaded_file.seek(0)
-                            new_df = pd.read_csv(uploaded_file, skiprows=skip, encoding=enc)
+                            lines = text_data.splitlines()
+                            skip = 0
+                            for idx, line in enumerate(lines):
+                                if ('"No"' in line) or ('"Pitch Type"' in line) or ('PitchNo' in line):
+                                    skip = idx
+                                    break
+                                    
+                            new_df = pd.read_csv(io.StringIO(text_data), skiprows=skip)
                         else:
                             temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
-                            if "Rapsodo" in data_source:
-                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["No", "Pitch ID", "Pitch Type"])), 4)
-                            else:
-                                skip = next((i for i, row in temp_df.iterrows() if any(k in str(row.values) for k in ["PitchNo", "Pitcher", "Pitch Type", "Total Spin"])), 0)
+                            skip = 0
+                            for idx, row in temp_df.iterrows():
+                                row_str = str(row.values)
+                                if 'No' in row_str or 'PitchType' in row_str or 'PitchNo' in row_str:
+                                    skip = idx
+                                    break
                             uploaded_file.seek(0)
                             new_df = pd.read_excel(uploaded_file, skiprows=skip)
                             
