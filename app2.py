@@ -308,21 +308,6 @@ def add_extension_url_background(fig):
             )
         )
 
-# --- 🎯 グラフの高さを揃えるためのCSS ---
-st.markdown("""
-    <style>
-    /* .stPlotlyChart クラスのコンテナの余白を調整 */
-    .stPlotlyChart {
-        margin-bottom: -1rem !class_orders;
-        margin-top: -1rem !class_orders;
-    }
-    /* カラム内のコンテキスト余白を調整 */
-    [data-testid="column"] > div > div > div > div {
-        overflow: hidden;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
 
@@ -769,7 +754,6 @@ with tab1:
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
                     y_range = [1.0, 2.3]
                     
-                    # 🎯 高さを揃えるため、全てのグラフに height=400 を指定
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -799,7 +783,7 @@ with tab1:
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_all.update_layout(plot_bgcolor='white', height=400, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
+                        fig_rel_all.update_layout(plot_bgcolor='white', height=480, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
                         st.plotly_chart(fig_rel_all, use_container_width=True)
                         
                     with rel_col2:
@@ -833,7 +817,7 @@ with tab1:
                         fig_rel_avg.update_traces(marker=dict(size=15))
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_avg.update_layout(plot_bgcolor='white', height=400, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
+                        fig_rel_avg.update_layout(plot_bgcolor='white', height=480, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
                     with rel_col3:
@@ -886,8 +870,9 @@ with tab1:
 
                         fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_range.add_vline(x=0, line_dash="dash", line_color="gray")
+                        # 🎯 シンプルにheightを他の2つと同じ「480」に設定
                         fig_rel_range.update_layout(
-                            plot_bgcolor='white', height=400, shapes=shapes_list,
+                            plot_bgcolor='white', height=480, shapes=shapes_list,
                             xaxis=dict(range=x_range, gridcolor='lightgray', dtick=0.2, title='左右 [m]'), 
                             yaxis=dict(range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
                         )
@@ -938,6 +923,7 @@ with tab1:
                         ext_stats['sort_rank'] = ext_stats['Pitch Type'].apply(get_pitch_rank)
                         ext_stats = ext_stats.sort_values(by=['sort_rank', 'Pitch Type'])
                         
+                        # 元の棒グラフ形式を維持
                         fig_ext_bar = px.bar(
                             ext_stats,
                             x=c_ext,
@@ -950,7 +936,7 @@ with tab1:
                             text=ext_stats[c_ext].apply(lambda x: f"{x:.2f}m")
                         )
                         fig_ext_bar.update_traces(textposition='outside')
-                        # 🎯 X軸の表示レンジを [0, 2.3] に修正
+                        # 🎯 ここだけ修正。表示レンジを [0, 2.3] に固定
                         fig_ext_bar.update_layout(plot_bgcolor='white', height=500, showlegend=False, xaxis=dict(range=[0, 2.3], gridcolor='lightgray'), yaxis=dict(title=''))
                         st.plotly_chart(fig_ext_bar, use_container_width=True)
                         
