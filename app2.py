@@ -60,8 +60,8 @@ GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 # 🖼️ シルエット画像のRaw URL
 SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
-# 🖼️ エクステンション用横向きイラストのRaw URL（リポジトリのdata/assetsにアップロードしてお使いください）
-EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Aextension_silhouette.png"
+# 🖼️ エクステンション用横向きイラストのRaw URL
+EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
 def load_data_from_github(file_path):
     if not GITHUB_TOKEN:
@@ -286,10 +286,9 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
-    """エクステンション分析グラフ用の背景画像配置（x=0がプレート、yが高さ）"""
+    """エクステンション分析グラフ用の背景画像配置（x=0.0がプレート、y=0.0が地面）"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        # プレート位置(0m)からリリース付近（約1.5m〜2.5m）までをカバーする配置
         x_min, x_max = 0.0, 2.5
         y_min, y_max = 0.0, 2.2
 
@@ -889,11 +888,11 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
-                    st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
+                    st.info("ℹ️ リリリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（横向きイラスト＋プレート起点エクステンション＆リリース高さ） ---
+                # --- 📏 エクステンション分析セクション（(0,0)起点・原点軸表示） ---
                 st.divider()
-                st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
+                st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリリース高さ）")
                 
                 if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
                     ext_col1, ext_col2 = st.columns(2)
@@ -902,11 +901,11 @@ with tab1:
                     if 'Data Source' in df_pos_source.columns:
                         hover_items_ext.append('Data Source')
                         
-                    ext_x_range = [1.2, 2.5] # プレート(0m)から手前側へ向けての一般的なエクステンション範囲
-                    ext_y_range = [1.0, 2.3]
+                    ext_x_range = [0.0, 2.5]
+                    ext_y_range = [0.0, 2.3]
                     
                     with ext_col1:
-                        st.write("▼ プレート起点のエクステンション × リリース高さ（全投球）")
+                        st.write("▼ プレート起点のエクステンション × リリリース高さ（全投球）")
                         fig_ext_scatter = px.scatter(
                             df_pos_source.dropna(subset=[c_ext, c_rh]),
                             x=c_ext,
@@ -921,13 +920,13 @@ with tab1:
                         )
                         add_extension_url_background(fig_ext_scatter)
                         
-                        fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black") # プレート位置
-                        fig_ext_scatter.add_hline(y=0, line_width=1, line_color="gray")
+                        fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
+                        fig_ext_scatter.add_hline(y=0, line_width=2, line_color="black")
                         fig_ext_scatter.update_layout(
                             plot_bgcolor='white',
                             height=480,
-                            xaxis=dict(gridcolor='lightgray', dtick=0.2, title='エクステンション [m]'),
-                            yaxis=dict(gridcolor='lightgray', dtick=0.1, title='リリース高さ [m]')
+                            xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
+                            yaxis=dict(gridcolor='lightgray', dtick=0.5, title='リリース高さ [m]')
                         )
                         st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
