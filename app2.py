@@ -60,7 +60,7 @@ GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 # 🖼️ シルエット画像のRaw URL
 SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
-# 🖼️ エクステンション用横向きイラストのRaw URL（正しく画像データを指すraw.githubusercontent.comに修正）
+# 🖼️ エクステンション用横向きイラストのRaw URL
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
 def load_data_from_github(file_path):
@@ -234,7 +234,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 @st.cache_data(ttl=3600)
 def get_processed_extension_silhouette_b64():
-    """エクステンション用の横向きシルエット画像の背景透過処理（Raw URLより取得）"""
+    """エクステンション用の横向きシルエット画像の背景透過処理"""
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -248,7 +248,6 @@ def get_processed_extension_silhouette_b64():
         datas = img.getdata()
         newData = []
         for item in datas:
-            # 白背景（またはそれに近い明るいピクセル）を透明化
             if item[0] > 210 and item[1] > 210 and item[2] > 210:
                 newData.append((255, 255, 255, 0))
             else:
@@ -287,10 +286,11 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
-    """エクステンション分析グラフ用の背景画像配置（x=0.0がプレート、y=0.0が地面）"""
+    """エクステンション分析グラフ用の背景画像配置（プレートのピクセル位置を原点(0,0)に正確に一致させるオフセット調整）"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        x_min, x_max = 0.0, 2.5
+        # プレート位置が画像の約 7.5% の位置にあると仮定し、xを -0.20m シフトして原点に合致させます
+        x_min, x_max = -0.20, 2.70
         y_min, y_max = 0.0, 2.3
 
         fig.add_layout_image(
@@ -891,7 +891,7 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（(0,0)起点・横向きイラスト背景付き） ---
+                # --- 📏 エクステンション分析セクション（原点＆イラスト位置調整完了） ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
@@ -919,7 +919,7 @@ with tab1:
                             category_orders=category_orders_dict,
                             hover_data=hover_items_ext
                         )
-                        # 背景に横向き投球フォームイラストを配置
+                        # プレート位置(0,0)にイラストのホームベースが重なるように調整した背景配置
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
