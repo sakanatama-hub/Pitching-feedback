@@ -286,19 +286,20 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
-    """エクステンション分析グラフ用の背景画像配置（イラストのスケールを小さくし、投球の手の位置をプロット域に合わせる）"""
+    """エクステンション分析グラフ用の背景画像配置（イラストの横幅・高さをコンパクトに縮小し、プロット位置に正確に合致させる）"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        # スケールを小さく調整（sizexを広げてイラスト自体を縮小させ、プレート位置をx=0.0に合わせる）
+        # sizex/sizeyを小さく設定してイラストを縮小
+        # x=-0.12, y=2.05, sizex=2.15, sizey=2.05 に設定することで手先が約1.7〜1.8mのプロット中心に収まります
         fig.add_layout_image(
             dict(
                 source=img_src,
                 xref="x",
                 yref="y",
-                x=-0.23,
-                y=2.50,
-                sizex=3.45,
-                sizey=2.50,
+                x=-0.12,
+                y=2.05,
+                sizex=2.15,
+                sizey=2.05,
                 xanchor="left",
                 yanchor="top",
                 sizing="stretch",
@@ -890,7 +891,7 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（イラストのスケール＆位置調整完了） ---
+                # --- 📏 エクステンション分析セクション（イラストのスケール縮小＆位置調整完了） ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
@@ -919,7 +920,7 @@ with tab1:
                             hover_data=hover_items_ext
                         )
                         
-                        # スケールを縮小・調整した背景イラスト配置
+                        # コンパクトに縮小配置した背景イラスト
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
