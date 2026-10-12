@@ -234,6 +234,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
 
 @st.cache_data(ttl=3600)
 def get_processed_extension_silhouette_b64():
+    """エクステンション用の横向きシルエット画像の背景透過処理"""
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -285,17 +286,20 @@ def add_pitcher_url_background(fig, is_right_handed=True):
         )
 
 def add_extension_url_background(fig):
+    """エクステンション分析グラフ用の背景画像配置"""
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
+        # グラフのレンジに合わせた配置調整
+        # (x, y) は画像の左上端の座標。sizex, sizeyはグラフ座標系での幅と高さ
         fig.add_layout_image(
             dict(
                 source=img_src,
                 xref="x",
                 yref="y",
-                x=-0.12,
-                y=2.05,
-                sizex=2.15,
-                sizey=2.05,
+                x=-0.23,
+                y=2.50,
+                sizex=3.45, # プレート(x=0)から十分な長さ
+                sizey=2.50, # 地面(y=0)から高さ
                 xanchor="left",
                 yanchor="top",
                 sizing="stretch",
@@ -303,6 +307,21 @@ def add_extension_url_background(fig):
                 layer="below"
             )
         )
+
+# --- 🎯 グラフの高さを揃えるためのCSS ---
+st.markdown("""
+    <style>
+    /* .stPlotlyChart クラスのコンテナの余白を調整 */
+    .stPlotlyChart {
+        margin-bottom: -1rem !class_orders;
+        margin-top: -1rem !class_orders;
+    }
+    /* カラム内のコンテキスト余白を調整 */
+    [data-testid="column"] > div > div > div > div {
+        overflow: hidden;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- タブ構造の定義 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
@@ -736,7 +755,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット（Trackman基準 / 1メモリの大きさ統一・アスペクト比固定） ---
+                # --- 📍 リリース位置プロット（Trackman基準） ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手 / Trackman基準）")
                 
@@ -750,6 +769,7 @@ with tab1:
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
                     y_range = [1.0, 2.3]
                     
+                    # 🎯 高さを揃えるため、全てのグラフに height=400 を指定
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -779,12 +799,7 @@ with tab1:
                         
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_all.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.1), 
-                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
-                        )
+                        fig_rel_all.update_layout(plot_bgcolor='white', height=400, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
                         st.plotly_chart(fig_rel_all, use_container_width=True)
                         
                     with rel_col2:
@@ -818,12 +833,7 @@ with tab1:
                         fig_rel_avg.update_traces(marker=dict(size=15))
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
-                        fig_rel_avg.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.1), 
-                            xaxis=dict(gridcolor='lightgray', dtick=0.2)
-                        )
+                        fig_rel_avg.update_layout(plot_bgcolor='white', height=400, yaxis=dict(gridcolor='lightgray', dtick=0.1), xaxis=dict(gridcolor='lightgray', dtick=0.2))
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
                     with rel_col3:
@@ -877,33 +887,31 @@ with tab1:
                         fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_range.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_range.update_layout(
-                            plot_bgcolor='white', 
-                            height=480, 
-                            shapes=shapes_list,
+                            plot_bgcolor='white', height=400, shapes=shapes_list,
                             xaxis=dict(range=x_range, gridcolor='lightgray', dtick=0.2, title='左右 [m]'), 
-                            yaxis=dict(scaleanchor="x", scaleratio=1, range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
+                            yaxis=dict(range=y_range, gridcolor='lightgray', dtick=0.1, title='高さ [m]')
                         )
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション（ご指定のレイアウト構成＆アスペクト比固定） ---
+                # --- 📏 エクステンション分析セクション ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
                 if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
-                    ext_x_range = [0.0, 2.5]
-                    ext_y_range = [0.0, 2.3]
-                    
-                    # 上段：全球散布図 & 球種別平均プロット（横並び）
                     ext_col1, ext_col2 = st.columns(2)
                     
                     hover_items_ext = ['ID', 'Date', 'Data Type', c_vel, c_ext, c_rh]
                     if 'Data Source' in df_pos_source.columns:
                         hover_items_ext.append('Data Source')
                         
+                    # 散布図のレンジ設定
+                    ext_x_range = [0.0, 2.5]
+                    ext_y_range = [0.0, 2.3]
+                    
                     with ext_col1:
-                        st.write("▼ プレート起点のエクステンション × リリース高さ（全投球）")
+                        st.write("▼ プレート起点のエクステンション × リリース高さ（全球散布図）")
                         fig_ext_scatter = px.scatter(
                             df_pos_source.dropna(subset=[c_ext, c_rh]),
                             x=c_ext,
@@ -911,55 +919,41 @@ with tab1:
                             color='Pitch Type',
                             range_x=ext_x_range,
                             range_y=ext_y_range,
-                            labels={c_ext: 'エクステンション [m]', c_rh: '高さ [m]'},
+                            labels={c_ext: 'エクステンション（プレートからの距離） [m]', c_rh: 'リリース高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict,
                             hover_data=hover_items_ext
                         )
+                        
                         add_extension_url_background(fig_ext_scatter)
                         
                         fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black")
                         fig_ext_scatter.add_hline(y=0, line_width=2, line_color="black")
-                        fig_ext_scatter.update_layout(
-                            plot_bgcolor='white',
-                            height=480,
-                            xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.5, title='高さ [m]')
-                        )
+                        fig_ext_scatter.update_layout(plot_bgcolor='white', height=500, xaxis=dict(gridcolor='lightgray', dtick=0.5), yaxis=dict(gridcolor='lightgray', dtick=0.5))
                         st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
                     with ext_col2:
-                        st.write("▼ 球種別平均（エクステンション × リリース高さ）")
-                        ext_avg_stats = df_pos_source.dropna(subset=[c_ext, c_rh]).groupby('Pitch Type').agg({
-                            c_ext: 'mean',
-                            c_rh: 'mean'
-                        }).reset_index()
+                        st.write("▼ 球種別平均エクステンション [m]")
+                        ext_stats = df_pos_source.dropna(subset=[c_ext]).groupby('Pitch Type')[c_ext].mean().reset_index()
+                        ext_stats['sort_rank'] = ext_stats['Pitch Type'].apply(get_pitch_rank)
+                        ext_stats = ext_stats.sort_values(by=['sort_rank', 'Pitch Type'])
                         
-                        fig_ext_avg = px.scatter(
-                            ext_avg_stats,
+                        fig_ext_bar = px.bar(
+                            ext_stats,
                             x=c_ext,
-                            y=c_rh,
+                            y='Pitch Type',
+                            orientation='h',
+                            labels={'Pitch Type': '球種', c_ext: '平均エクステンション [m]'},
                             color='Pitch Type',
-                            range_x=ext_x_range,
-                            range_y=ext_y_range,
-                            labels={c_ext: 'エクステンション [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
-                            category_orders=category_orders_dict
+                            category_orders=category_orders_dict,
+                            text=ext_stats[c_ext].apply(lambda x: f"{x:.2f}m")
                         )
-                        add_extension_url_background(fig_ext_avg)
+                        fig_ext_bar.update_traces(textposition='outside')
+                        # 🎯 X軸の表示レンジを [0, 2.3] に修正
+                        fig_ext_bar.update_layout(plot_bgcolor='white', height=500, showlegend=False, xaxis=dict(range=[0, 2.3], gridcolor='lightgray'), yaxis=dict(title=''))
+                        st.plotly_chart(fig_ext_bar, use_container_width=True)
                         
-                        fig_ext_avg.update_traces(marker=dict(size=16))
-                        fig_ext_avg.add_vline(x=0, line_width=2, line_color="black")
-                        fig_ext_avg.add_hline(y=0, line_width=2, line_color="black")
-                        fig_ext_avg.update_layout(
-                            plot_bgcolor='white',
-                            height=480,
-                            xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
-                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', dtick=0.5, title='高さ [m]')
-                        )
-                        st.plotly_chart(fig_ext_avg, use_container_width=True)
-
-                    # 下段：投球順エクステンション推移
                     st.write("▼ 投球順エクステンション推移 [m]")
                     df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
                     df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
@@ -974,19 +968,8 @@ with tab1:
                         category_orders=category_orders_dict,
                         hover_data=['Date', c_vel]
                     )
-                    fig_ext_trend.add_trace(go.Scatter(
-                        x=df_ext_trend['Pitch_Index'],
-                        y=df_ext_trend[c_ext],
-                        mode='lines',
-                        line=dict(color='gray', width=1, dash='dot'),
-                        showlegend=False
-                    ))
-                    fig_ext_trend.update_layout(
-                        plot_bgcolor='white',
-                        height=420,
-                        yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
-                        xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
-                    )
+                    fig_ext_trend.add_trace(go.Scatter(x=df_ext_trend['Pitch_Index'], y=df_ext_trend[c_ext], mode='lines', line=dict(color='gray', width=1, dash='dot'), showlegend=False))
+                    fig_ext_trend.update_layout(plot_bgcolor='white', height=400, yaxis=dict(gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_ext_trend, use_container_width=True)
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
