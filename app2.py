@@ -127,15 +127,44 @@ PLAYER_HANDS = {
     "#20 嘉陽 宗一郎": "右", "#21 池村 健太郎": "左", "#30 平野 大智": "右"
 }
 
+# --- 🎨 視認性重視・高コントラスト球種カラーマップ ---
 COLOR_MAP_PITCH = {
-    "Straight": "red", "Fastball": "red", "ストレート": "red", "四縫線": "red", "4-Seam": "red",
-    "Split": "blue", "Splitter": "blue", "スプリット": "blue",
-    "Changeup": "green", "CH": "green", "チェンジアップ": "green",
-    "Cutter": "orange", "Cut": "orange", "カット": "orange",
-    "Slider": "yellow", "SL": "yellow", "スライダー": "yellow",
-    "Curve": "darkblue", "Curveball": "darkblue", "CU": "darkblue", "カーブ": "darkblue",
-    "Sinker": "pink", "SI": "pink", "シンカー": "pink", "TwoSeam": "pink"
+    # 🔴 ストレート系（赤）
+    "Straight": "#E60000", "Fastball": "#E60000", "ストレート": "#E60000", "四縫線": "#E60000", "4-Seam": "#E60000", "Four-Seam": "#E60000",
+    
+    # 💗 ツーシーム・シンカー系（ディープピンク）
+    "Sinker": "#FF1493", "SI": "#FF1493", "シンカー": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493",
+    
+    # 🟡 スライダー系（イエローゴールド：くっきりした黄色）
+    "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700",
+    
+    # 🟧 カットボール系（オレンジレッド / 朱色：スライダーと明確に区別）
+    "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
+    
+    # 🔵 スプリット・フォーク系（コバルトブルー）
+    "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
+    
+    # 🟢 チェンジアップ系（エメラルドグリーン）
+    "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
+    
+    # 🟦 カーブ系（ダークネイビー）
+    "Curve": "#000080", "Curveball": "#000080", "CurveBall": "#000080", "CU": "#000080", "カーブ": "#000080",
+    
+    # 🟣 スイーパー系（パープル）
+    "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2"
 }
+
+def get_pitch_color(pitch_type_str):
+    """球種名から色を取得（大文字小文字・部分一致に対応）"""
+    if not pitch_type_str or pd.isna(pitch_type_str):
+        return "#808080"
+    pt = str(pitch_type_str).strip()
+    if pt in COLOR_MAP_PITCH:
+        return COLOR_MAP_PITCH[pt]
+    for k, v in COLOR_MAP_PITCH.items():
+        if k.lower() == pt.lower():
+            return v
+    return "#808080"
 
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
@@ -542,12 +571,6 @@ with tab1:
             
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
             
-            # ==========================================
-            # 💡 データソース別の分離処理
-            # 1. 変化量・リリース位置系：Trackmanのみ（両方・Trackman選択時）、Rapsodoのみ（Rapsodo選択時）
-            # 2. 回転数・回転効率系：Rapsodo優先（Rapsodo選択時、またはデフォルト）
-            # ==========================================
-            
             # --- 変化量・リリース用データ (df_pos_source) ---
             if source_filter == "Trackmanのみ":
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
@@ -593,7 +616,6 @@ with tab1:
             if 'Pitch Type' in df_base.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
-                # サマリー表は位置系は位置データ、回転系は回転データから集計
                 agg_dict = {}
                 for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext]:
                     if c in df_base.columns:
@@ -737,7 +759,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 球種別リリース範囲
+                    # 3. 球種別リリース範囲（統一指定カラー・コントラスト強化）
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -761,7 +783,7 @@ with tab1:
                                 rx = float(max(std_x * 1.8, 0.035) if not np.isnan(std_x) else 0.035)
                                 ry = float(max(std_y * 1.8, 0.035) if not np.isnan(std_y) else 0.035)
                                 
-                                color = COLOR_MAP_PITCH.get(pt, "gray")
+                                color = get_pitch_color(pt)
                                 
                                 shapes_list.append(dict(
                                     type="circle",
@@ -852,7 +874,7 @@ with tab1:
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
 
-                # --- ⚾️ 3Dスピンビジュアライザー（Rapsodo優先データ参照） ---
+                # --- ⚾️ 3Dスピンビジュアライザー（Rapsodo回転データ参照） ---
                 st.divider()
                 st.subheader("⚾️ 3D軌道（Rapsodo回転データ参照）")
                 valid_df = df_rot_source.dropna(subset=['Pitch Type', c_dir, c_rev])
