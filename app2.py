@@ -153,7 +153,11 @@ COLUMN_MAP = {
     'Release Height': 'RelHeight',
     'Release Side': 'RelSide',
     'Release Height (release)': 'RelHeight',
-    'Release Side (release)': 'RelSide'
+    'Release Side (release)': 'RelSide',
+    'Release Extension': 'Extension',
+    'ReleaseExtension': 'Extension',
+    'Extension (release)': 'Extension',
+    'Extension [m]': 'Extension'
 }
 
 def time_to_degrees(time_str):
@@ -285,7 +289,7 @@ with tab2:
                         new_df['Data Type'] = data_type
                         new_df['Data Source'] = data_source
                         
-                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide']
+                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension']
                         for c in cols_to_num:
                             if c in new_df.columns:
                                 new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
@@ -529,7 +533,7 @@ with tab1:
         if not df.empty:
             df['ID'] = df.index
             
-            cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide']
+            cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension']
             for c in cols_to_num:
                 if c in df.columns:
                     df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
@@ -537,7 +541,7 @@ with tab1:
             hand = PLAYER_HANDS.get(p_name, "右")
             is_right_hand = (hand == "右")
             
-            c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide'
+            c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
             
             # ==========================================
             # 💡 2段階方式によるチーム平均の算出
@@ -574,7 +578,7 @@ with tab1:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
                 agg_dict = {}
-                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs]:
+                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext]:
                     if c in df.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
@@ -585,7 +589,8 @@ with tab1:
                     f"{c_vel}_mean": "平均球速", f"{c_vel}_max": "最高球速",
                     f"{c_rev}_mean": "平均回転数", f"{c_eff}_mean": "回転効率 (%)",
                     f"{c_vb}_mean": "縦変化量 (VB)", f"{c_hb}_mean": "横変化量 (HB)",
-                    f"{c_rh}_mean": "リリース高さ (m)", f"{c_rs}_mean": "リリース横位置 (m)"
+                    f"{c_rh}_mean": "リリース高さ (m)", f"{c_rs}_mean": "リリース横位置 (m)",
+                    f"{c_ext}_mean": "エクステンション (m)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
                 st.dataframe(stats_df.style.format(precision=2), use_container_width=True)
@@ -626,7 +631,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット（横3並びレイアウト） ---
+                # --- 📍 リリース位置プロット ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
                 
@@ -773,6 +778,65 @@ with tab1:
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
                     st.info("ℹ️ リリリース位置データ（RelHeight / RelSide）が含まれていないか、有効な数値データが存在しません。")
+
+                # --- 📏 4. エクステンション（球持ち）分析セクション ---
+                st.divider()
+                st.subheader("📏 エクステンション分析（球持ち / リリース前傾度）")
+                
+                if c_ext in df.columns and not df[c_ext].dropna().empty:
+                    ext_col1, ext_col2 = st.columns(2)
+                    
+                    # A. 球種別エクステンション分布（Box Plot）
+                    with ext_col1:
+                        st.write("▼ 球種別エクステンション分布 [m]")
+                        fig_ext_box = px.box(
+                            df.dropna(subset=[c_ext, 'Pitch Type']),
+                            x='Pitch Type',
+                            y=c_ext,
+                            color='Pitch Type',
+                            points="all",
+                            labels={c_ext: 'エクステンション [m]', 'Pitch Type': '球種'},
+                            color_discrete_map=COLOR_MAP_PITCH
+                        )
+                        fig_ext_box.update_layout(
+                            plot_bgcolor='white',
+                            height=420,
+                            yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
+                            xaxis=dict(gridcolor='lightgray')
+                        )
+                        st.plotly_chart(fig_ext_box, use_container_width=True)
+                        
+                    # B. 投球順エクステンション推移
+                    with ext_col2:
+                        st.write("▼ 投球順エクステンション推移 [m]")
+                        df_ext_trend = df.dropna(subset=[c_ext]).copy().reset_index(drop=True)
+                        df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
+                        
+                        fig_ext_trend = px.scatter(
+                            df_ext_trend,
+                            x='Pitch_Index',
+                            y=c_ext,
+                            color='Pitch Type',
+                            labels={'Pitch_Index': '投球数 (球目)', c_ext: 'エクステンション [m]'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            hover_data=['Date', c_vel]
+                        )
+                        fig_ext_trend.add_trace(go.Scatter(
+                            x=df_ext_trend['Pitch_Index'],
+                            y=df_ext_trend[c_ext],
+                            mode='lines',
+                            line=dict(color='gray', width=1, dash='dot'),
+                            showlegend=False
+                        ))
+                        fig_ext_trend.update_layout(
+                            plot_bgcolor='white',
+                            height=420,
+                            yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
+                            xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
+                        )
+                        st.plotly_chart(fig_ext_trend, use_container_width=True)
+                else:
+                    st.info("ℹ️ エクステンション（Extension）のデータが含まれていないか、有効な数値が存在しません。")
 
                 # --- 3Dスピンビジュアライザー ---
                 st.divider()
