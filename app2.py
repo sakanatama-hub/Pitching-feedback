@@ -750,11 +750,11 @@ with tab1:
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
                     y_range = [1.0, 2.3]
                     
-                    # 🎯 3つのグラフすべてでマージン（余白）と高さを完全に共通化し、枠の大きさを揃える
+                    # 🎯 グラフの描画領域の余白（右側）をすっきりさせて幅を広げる
                     common_release_layout = dict(
                         plot_bgcolor='white',
                         height=480,
-                        margin=dict(l=60, r=160, t=50, b=50), # 左右上下の余白（特に右側r）を統一
+                        margin=dict(l=50, r=80, t=40, b=40), # 右側の余白を狭めてグラフ幅を拡大
                         yaxis=dict(gridcolor='lightgray', dtick=0.1, range=y_range, title='高さ [m]'),
                         xaxis=dict(gridcolor='lightgray', dtick=0.2, range=x_range, title='左右 [m]')
                     )
@@ -871,7 +871,6 @@ with tab1:
                         fig_rel_range.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_range.add_vline(x=0, line_dash="dash", line_color="gray")
                         
-                        # 3つ目のグラフにも同じ共通レイアウトを適用
                         layout_args_range = common_release_layout.copy()
                         layout_args_range['shapes'] = shapes_list
                         fig_rel_range.update_layout(**layout_args_range)
