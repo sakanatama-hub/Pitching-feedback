@@ -60,6 +60,8 @@ GITHUB_PITCH_FILE_PATH = "data/pitch_data.xlsx"
 
 # 🖼️ シルエット画像のRaw URL
 SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Arelease_silhouette.png"
+# 🖼️ エクステンション用横向きイラストのRaw URL（リポジトリのdata/assetsにアップロードしてお使いください）
+EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/assets%3Aextension_silhouette.png"
 
 def load_data_from_github(file_path):
     if not GITHUB_TOKEN:
@@ -129,59 +131,35 @@ PLAYER_HANDS = {
 
 # --- 🎨 視認性重視・高コントラスト球種カラーマップ ---
 COLOR_MAP_PITCH = {
-    # 🔴 1. ストレート系（赤）
     "Straight": "#E60000", "Fastball": "#E60000", "ストレート": "#E60000", "四縫線": "#E60000", "4-Seam": "#E60000", "Four-Seam": "#E60000",
-    
-    # 🟦 2. カーブ系（ダークネイビー）
     "Curve": "#000080", "Curveball": "#000080", "CurveBall": "#000080", "CU": "#000080", "カーブ": "#000080",
-    
-    # 🟡 3. スライダー系（イエローゴールド）
     "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700", "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2",
-    
-    # 🟧 4. カットボール系（オレンジレッド / 朱色）
     "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
-    
-    # 🔵 5. フォーク・スプリット系（コバルトブルー）
     "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
-    
-    # 🟢 6. チェンジアップ系（エメラルドグリーン）
     "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
-    
-    # 💗 7. ツーシーム・シンカー系（ディープピンク）
     "Sinker": "#FF1493", "SI": "#FF1493", "シンカー": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493"
 }
 
-# --- ランク定義（表示優先順序） ---
 PITCH_ORDER_RANK = {
-    # 1. ストレート
     "straight": 1, "fastball": 1, "ストレート": 1, "四縫線": 1, "4-seam": 1, "four-seam": 1,
-    # 2. カーブ
     "curve": 2, "curveball": 2, "cu": 2, "カーブ": 2,
-    # 3. スライダー
     "slider": 3, "sl": 3, "スライダー": 3, "sweeper": 3, "スイーパー": 3,
-    # 4. カットボール
     "cutter": 4, "cut": 4, "カット": 4, "カットボール": 4,
-    # 5. フォーク / スプリット
     "split": 5, "splitter": 5, "スプリット": 5, "フォーク": 5, "fs": 5,
-    # 6. チェンジアップ
     "changeup": 6, "ch": 6, "チェンジアップ": 6,
-    # 7. ツーシーム / シンカー
     "sinker": 7, "si": 7, "シンカー": 7, "twoseam": 7, "two-seam": 7, "two seam": 7, "ツーシーム": 7
 }
 
 def get_pitch_rank(pitch_type_str):
-    """球種から表示順位（1〜8）を取得"""
     if not pitch_type_str or pd.isna(pitch_type_str):
         return 99
     pt_norm = str(pitch_type_str).strip().lower()
     return PITCH_ORDER_RANK.get(pt_norm, 98)
 
 def sort_pitch_types(pitch_types_list):
-    """球種リストを指定された表示順序に従ってソート"""
     return sorted(list(set(pitch_types_list)), key=lambda x: (get_pitch_rank(x), str(x)))
 
 def get_pitch_color(pitch_type_str):
-    """球種名から色を取得"""
     if not pitch_type_str or pd.isna(pitch_type_str):
         return "#808080"
     pt = str(pitch_type_str).strip()
@@ -254,6 +232,34 @@ def get_processed_silhouette_b64(is_right_handed=True):
     except Exception as e:
         return None
 
+@st.cache_data(ttl=3600)
+def get_processed_extension_silhouette_b64():
+    """エクステンション用の横向きシルエット画像の背景透過処理"""
+    headers = {}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
+    try:
+        r = requests.get(EXTENSION_IMAGE_URL, headers=headers, timeout=5)
+        if r.status_code != 200:
+            return None
+
+        img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        datas = img.getdata()
+        newData = []
+        for item in datas:
+            if item[0] > 210 and item[1] > 210 and item[2] > 210:
+                newData.append((255, 255, 255, 0))
+            else:
+                newData.append(item)
+        img.putdata(newData)
+            
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode('utf-8')}"
+    except Exception as e:
+        return None
+
 def add_pitcher_url_background(fig, is_right_handed=True):
     img_src = get_processed_silhouette_b64(is_right_handed)
     if img_src:
@@ -275,6 +281,29 @@ def add_pitcher_url_background(fig, is_right_handed=True):
                 sizey=abs(y_max - y_min),
                 sizing="stretch",
                 opacity=0.45,
+                layer="below"
+            )
+        )
+
+def add_extension_url_background(fig):
+    """エクステンション分析グラフ用の背景画像配置（x=0がプレート、yが高さ）"""
+    img_src = get_processed_extension_silhouette_b64()
+    if img_src:
+        # プレート位置(0m)からリリース付近（約1.5m〜2.5m）までをカバーする配置
+        x_min, x_max = 0.0, 2.5
+        y_min, y_max = 0.0, 2.2
+
+        fig.add_layout_image(
+            dict(
+                source=img_src,
+                xref="x",
+                yref="y",
+                x=x_min,
+                y=y_max,
+                sizex=abs(x_max - x_min),
+                sizey=abs(y_max - y_min),
+                sizing="stretch",
+                opacity=0.40,
                 layer="below"
             )
         )
@@ -602,7 +631,7 @@ with tab1:
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
             elif source_filter == "Rapsodoのみ":
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
-            else: # 両方（すべて表示）のときは変化量・リリース位置はTrackmanのみにする
+            else:
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
 
             # --- 回転系・3D用データ (df_rot_source) ---
@@ -610,7 +639,7 @@ with tab1:
                 df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
             elif source_filter == "Trackmanのみ":
                 df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
-            else: # 両方（すべて表示）のときは回転系はRapsodoを優先、なければTrackman
+            else:
                 rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
                 df_rot_source = rap_chk if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
 
@@ -620,7 +649,6 @@ with tab1:
                 if c in df_team_calc.columns:
                     df_team_calc[c] = pd.to_numeric(df_team_calc[c].astype(str).str.replace('%', ''), errors='coerce')
             
-            # Trackmanデータかつヴァデルナ選手除外
             df_team_calc = df_team_calc[
                 df_team_calc['Data Source'].astype(str).str.contains("Trackman") & 
                 (~df_team_calc['Player Name'].astype(str).str.contains("ヴァデルナ"))
@@ -659,13 +687,11 @@ with tab1:
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
                 
-                # --- 📌 平均データサマリーのソート処理（指定球種順） ---
                 stats_df['sort_rank'] = stats_df['Pitch Type'].apply(get_pitch_rank)
                 stats_df = stats_df.sort_values(by=['sort_rank', 'Pitch Type']).drop(columns=['sort_rank']).reset_index(drop=True)
                 
                 st.dataframe(stats_df.style.format(precision=2), use_container_width=True)
                 
-                # 表示中の全球種を取得して順序ソート
                 active_pitch_types = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist()) if not df_pos_source.empty else []
                 category_orders_dict = {"Pitch Type": active_pitch_types}
 
@@ -728,7 +754,6 @@ with tab1:
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
                     y_range = [1.0, 2.3]
                     
-                    # 1. 全投球リリース位置
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
@@ -766,7 +791,6 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_all, use_container_width=True)
                         
-                    # 2. 球種別平均リリース位置
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
                         rel_stats = df_pos_source.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
@@ -806,7 +830,6 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 球種別リリース範囲（ソート順・統一指定カラー対応）
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -816,7 +839,6 @@ with tab1:
                         valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
-                        # 指定された球種順でループ
                         grouped_pt = {pt: grp for pt, grp in valid_rel_df.groupby('Pitch Type')}
                         ordered_pts = sort_pitch_types(list(grouped_pt.keys()))
                         
@@ -869,32 +891,45 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション分析セクション ---
+                # --- 📏 エクステンション分析セクション（横向きイラスト＋プレート起点エクステンション＆リリース高さ） ---
                 st.divider()
-                st.subheader("📏 エクステンション分析（球持ち / リリース前傾度）")
+                st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
                 
-                if c_ext in df_pos_source.columns and not df_pos_source[c_ext].dropna().empty:
+                if c_ext in df_pos_source.columns and c_rh in df_pos_source.columns and not df_pos_source[[c_ext, c_rh]].dropna().empty:
                     ext_col1, ext_col2 = st.columns(2)
                     
+                    hover_items_ext = ['ID', 'Date', 'Data Type', c_vel, c_ext, c_rh]
+                    if 'Data Source' in df_pos_source.columns:
+                        hover_items_ext.append('Data Source')
+                        
+                    ext_x_range = [1.2, 2.5] # プレート(0m)から手前側へ向けての一般的なエクステンション範囲
+                    ext_y_range = [1.0, 2.3]
+                    
                     with ext_col1:
-                        st.write("▼ 球種別エクステンション分布 [m]")
-                        fig_ext_box = px.box(
-                            df_pos_source.dropna(subset=[c_ext, 'Pitch Type']),
-                            x='Pitch Type',
-                            y=c_ext,
+                        st.write("▼ プレート起点のエクステンション × リリース高さ（全投球）")
+                        fig_ext_scatter = px.scatter(
+                            df_pos_source.dropna(subset=[c_ext, c_rh]),
+                            x=c_ext,
+                            y=c_rh,
                             color='Pitch Type',
-                            points="all",
-                            labels={c_ext: 'エクステンション [m]', 'Pitch Type': '球種'},
+                            range_x=ext_x_range,
+                            range_y=ext_y_range,
+                            labels={c_ext: 'エクステンション（プレートからの距離） [m]', c_rh: 'リリース高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
-                            category_orders=category_orders_dict
+                            category_orders=category_orders_dict,
+                            hover_data=hover_items_ext
                         )
-                        fig_ext_box.update_layout(
+                        add_extension_url_background(fig_ext_scatter)
+                        
+                        fig_ext_scatter.add_vline(x=0, line_width=2, line_color="black") # プレート位置
+                        fig_ext_scatter.add_hline(y=0, line_width=1, line_color="gray")
+                        fig_ext_scatter.update_layout(
                             plot_bgcolor='white',
-                            height=420,
-                            yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
-                            xaxis=dict(gridcolor='lightgray')
+                            height=480,
+                            xaxis=dict(gridcolor='lightgray', dtick=0.2, title='エクステンション [m]'),
+                            yaxis=dict(gridcolor='lightgray', dtick=0.1, title='リリース高さ [m]')
                         )
-                        st.plotly_chart(fig_ext_box, use_container_width=True)
+                        st.plotly_chart(fig_ext_scatter, use_container_width=True)
                         
                     with ext_col2:
                         st.write("▼ 投球順エクステンション推移 [m]")
@@ -920,7 +955,7 @@ with tab1:
                         ))
                         fig_ext_trend.update_layout(
                             plot_bgcolor='white',
-                            height=420,
+                            height=480,
                             yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
                             xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                         )
