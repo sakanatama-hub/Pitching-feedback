@@ -171,9 +171,6 @@ def time_to_degrees(time_str):
 
 @st.cache_data(ttl=3600)
 def get_processed_silhouette_b64(is_right_handed=True):
-    """
-    GitHubのRaw URLから画像を直接ダウンロードし、背景透過および「右投手の場合に反転」処理を行う関数
-    """
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -184,8 +181,6 @@ def get_processed_silhouette_b64(is_right_handed=True):
             return None
 
         img = Image.open(io.BytesIO(r.content)).convert("RGBA")
-        
-        # 白色の背景を透明化する処理
         datas = img.getdata()
         newData = []
         for item in datas:
@@ -195,7 +190,6 @@ def get_processed_silhouette_b64(is_right_handed=True):
                 newData.append(item)
         img.putdata(newData)
         
-        # 右投手の場合に画像を左右反転させる
         if is_right_handed:
             img = ImageOps.mirror(img)
             
@@ -206,12 +200,7 @@ def get_processed_silhouette_b64(is_right_handed=True):
         return None
 
 def add_pitcher_url_background(fig, is_right_handed=True):
-    """
-    イラストの手（ボール）の位置がチーム平均（高さ約1.51m、左右約0.56m）の
-    ★マークにピッタリ合致するようイラスト位置を調整
-    """
     img_src = get_processed_silhouette_b64(is_right_handed)
-    
     if img_src:
         if is_right_handed:
             x_min, x_max = -0.42, 0.98
@@ -273,7 +262,6 @@ with tab2:
                     try:
                         file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
                         if file_ext == '.csv':
-                            # エンコーディングの自動判定・フォールバック
                             bytes_data = uploaded_file.getvalue()
                             try:
                                 text_data = bytes_data.decode('utf-8')
@@ -439,7 +427,6 @@ with tab2:
                     with st.spinner("GitHub上のデータベースから削除を実行中..."):
                         try:
                             cleaned_db = db_df[~final_delete_mask]
-                            
                             success, msg = save_to_github_direct(cleaned_db, GITHUB_PITCH_FILE_PATH, f"Delete pitch data: {del_selected_player}")
                             
                             if success:
@@ -447,7 +434,7 @@ with tab2:
                                 time.sleep(1)
                                 st.rerun()
                             else:
-                                st.error(f"❌ 削除データの保存に失敗しました: {msg}")
+                                st.error(f"❌ 削除データの失敗: {msg}")
                         except Exception as ex:
                             st.error(f"❌ 削除処理エラー: {ex}")
 
@@ -534,27 +521,21 @@ with tab1:
             source_filter = st.selectbox("データ元フィルター", ["両方（すべて表示）", "Trackmanのみ", "Rapsodoのみ"], key="pitch_view_source")
         
         if start_date and end_date:
-            df = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
+            df_base = df_player[(df_player['Date'] >= start_date) & (df_player['Date'] <= end_date)].copy()
             
             if view_type == "ブルペンのみ":
-                df = df[df['Data Type'] == "ブルペン"]
+                df_base = df_base[df_base['Data Type'] == "ブルペン"]
             elif view_type == "シートBTのみ":
-                df = df[df['Data Type'] == "シートBT"]
-                
-            if source_filter == "Trackmanのみ":
-                df = df[df['Data Source'].astype(str).str.contains("Trackman")]
-            elif source_filter == "Rapsodoのみ":
-                df = df[df['Data Source'].astype(str).str.contains("Rapsodo")]
+                df_base = df_base[df_base['Data Type'] == "シートBT"]
         else:
-            df = pd.DataFrame()
+            df_base = pd.DataFrame()
             
-        if not df.empty:
-            df['ID'] = df.index
-            
+        if not df_base.empty:
+            df_base['ID'] = df_base.index
             cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension']
             for c in cols_to_num:
-                if c in df.columns:
-                    df[c] = pd.to_numeric(df[c].astype(str).str.replace('%', ''), errors='coerce')
+                if c in df_base.columns:
+                    df_base[c] = pd.to_numeric(df_base[c].astype(str).str.replace('%', ''), errors='coerce')
 
             hand = PLAYER_HANDS.get(p_name, "右")
             is_right_hand = (hand == "右")
@@ -562,45 +543,63 @@ with tab1:
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
             
             # ==========================================
-            # 💡 2段階方式によるチーム平均の算出
-            # （①選手個人の全投球平均を算出 ➔ ②選手別平均の平均をとる）
+            # 💡 データソース別の分離処理
+            # 1. 変化量・リリース位置系：Trackmanのみ（両方・Trackman選択時）、Rapsodoのみ（Rapsodo選択時）
+            # 2. 回転数・回転効率系：Rapsodo優先（Rapsodo選択時、またはデフォルト）
             # ==========================================
+            
+            # --- 変化量・リリース用データ (df_pos_source) ---
+            if source_filter == "Trackmanのみ":
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+            elif source_filter == "Rapsodoのみ":
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
+            else: # 両方（すべて表示）のときは変化量・リリース位置はTrackmanのみにする
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+
+            # --- 回転系・3D用データ (df_rot_source) ---
+            if source_filter == "Rapsodoのみ":
+                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
+            elif source_filter == "Trackmanのみ":
+                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+            else: # 両方（すべて表示）のときは回転系はRapsodoを優先、なければTrackman
+                rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
+                df_rot_source = rap_chk if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+
+            # チーム平均算出（位置系はTrackman基準のチーム平均）
             df_team_calc = df_all.copy()
             for c in [c_rh, c_rs]:
                 if c in df_team_calc.columns:
                     df_team_calc[c] = pd.to_numeric(df_team_calc[c].astype(str).str.replace('%', ''), errors='coerce')
             
-            # ヴァデルナ選手を計算対象から除外
-            df_team_calc = df_team_calc[~df_team_calc['Player Name'].astype(str).str.contains("ヴァデルナ")].dropna(subset=[c_rh, c_rs])
+            # Trackmanデータかつヴァデルナ選手除外
+            df_team_calc = df_team_calc[
+                df_team_calc['Data Source'].astype(str).str.contains("Trackman") & 
+                (~df_team_calc['Player Name'].astype(str).str.contains("ヴァデルナ"))
+            ].dropna(subset=[c_rh, c_rs])
             
             if not df_team_calc.empty:
-                # 左投手のRelSide（池村等）は絶対値（正の値）に変換
                 df_team_calc['RelSide_abs'] = df_team_calc[c_rs].abs()
-                
-                # Step 1: 選手個人ごとに全投球の平均値を算出
                 player_means = df_team_calc.groupby('Player Name').agg({
                     c_rh: 'mean',
                     'RelSide_abs': 'mean'
                 }).reset_index()
                 
-                # Step 2: 選手別平均値の平均をとってチーム平均とする
                 team_avg_rh = float(player_means[c_rh].mean())
                 team_abs_rs = float(player_means['RelSide_abs'].mean())
-                
-                # 対象選手の利き腕（左投手の場合はマイナス）に応じて表示座標を調整
                 team_display_rs = float(team_abs_rs if is_right_hand else -team_abs_rs)
             else:
                 team_avg_rh, team_display_rs = None, None
 
-            if 'Pitch Type' in df.columns:
+            if 'Pitch Type' in df_base.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
+                # サマリー表は位置系は位置データ、回転系は回転データから集計
                 agg_dict = {}
                 for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext]:
-                    if c in df.columns:
+                    if c in df_base.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
-                stats_df = df.groupby('Pitch Type').agg(agg_dict).reset_index()
+                stats_df = df_base.groupby('Pitch Type').agg(agg_dict).reset_index()
                 stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
                 rename_dict = {
@@ -613,18 +612,19 @@ with tab1:
                 stats_df = stats_df.rename(columns=rename_dict)
                 st.dataframe(stats_df.style.format(precision=2), use_container_width=True)
                 
+                # --- 📈 変化量マップ（Trackman基準） ---
                 st.divider()
-                st.subheader("📈 変化量マップ")
+                st.subheader("📈 変化量マップ（Trackman基準）")
                 plot_col1, plot_col2 = st.columns(2)
                 
                 hover_items = ['ID', 'Date', 'Data Type', c_vel]
-                if 'Data Source' in df.columns:
+                if 'Data Source' in df_pos_source.columns:
                     hover_items.append('Data Source')
                     
                 with plot_col1:
                     st.write("▼ 全投球プロット")
                     fig_all = px.scatter(
-                        df, 
+                        df_pos_source, 
                         x=c_hb, 
                         y=c_vb, 
                         color='Pitch Type', 
@@ -639,25 +639,23 @@ with tab1:
                     st.plotly_chart(fig_all, use_container_width=False)
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
-                    plot_x = "横変化量 (HB)" if "横変化量 (HB)" in stats_df.columns else f"{c_hb}_mean"
-                    plot_y = "縦変化量 (VB)" if "縦変化量 (VB)" in stats_df.columns else f"{c_vb}_mean"
-                    
-                    fig_avg = px.scatter(stats_df, x=plot_x, y=plot_y, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
+                    pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
+                    fig_avg = px.scatter(pos_stats, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
                     fig_avg.update_traces(marker=dict(size=15))
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False)
 
-                # --- 📍 リリース位置プロット ---
+                # --- 📍 リリース位置プロット（Trackman基準） ---
                 st.divider()
-                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
+                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手 / Trackman基準）")
                 
-                if c_rh in df.columns and c_rs in df.columns and not df[[c_rh, c_rs]].dropna().empty:
+                if c_rh in df_pos_source.columns and c_rs in df_pos_source.columns and not df_pos_source[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2, rel_col3 = st.columns(3)
                     
                     hover_items_rel = ['ID', 'Date', 'Data Type', c_vel, c_rh, c_rs]
-                    if 'Data Source' in df.columns:
+                    if 'Data Source' in df_pos_source.columns:
                         hover_items_rel.append('Data Source')
                         
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
@@ -667,7 +665,7 @@ with tab1:
                     with rel_col1:
                         st.write("▼ 全投球リリース位置")
                         fig_rel_all = px.scatter(
-                            df.dropna(subset=[c_rh, c_rs]),
+                            df_pos_source.dropna(subset=[c_rh, c_rs]),
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
@@ -703,7 +701,7 @@ with tab1:
                     # 2. 球種別平均リリース位置
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
-                        rel_stats = df.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                        rel_stats = df_pos_source.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
                         
                         fig_rel_avg = px.scatter(
                             rel_stats,
@@ -746,7 +744,7 @@ with tab1:
                         
                         add_pitcher_url_background(fig_rel_range, is_right_hand)
 
-                        valid_rel_df = df.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
+                        valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
                         for pt, group in valid_rel_df.groupby('Pitch Type'):
@@ -795,19 +793,19 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_range, use_container_width=True)
                 else:
-                    st.info("ℹ️ リリリース位置データ（RelHeight / RelSide）が含まれていないか、有効な数値データが存在しません。")
+                    st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📏 エクステンション（球持ち）分析セクション ---
+                # --- 📏 エクステンション分析セクション ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（球持ち / リリース前傾度）")
                 
-                if c_ext in df.columns and not df[c_ext].dropna().empty:
+                if c_ext in df_pos_source.columns and not df_pos_source[c_ext].dropna().empty:
                     ext_col1, ext_col2 = st.columns(2)
                     
                     with ext_col1:
                         st.write("▼ 球種別エクステンション分布 [m]")
                         fig_ext_box = px.box(
-                            df.dropna(subset=[c_ext, 'Pitch Type']),
+                            df_pos_source.dropna(subset=[c_ext, 'Pitch Type']),
                             x='Pitch Type',
                             y=c_ext,
                             color='Pitch Type',
@@ -825,7 +823,7 @@ with tab1:
                         
                     with ext_col2:
                         st.write("▼ 投球順エクステンション推移 [m]")
-                        df_ext_trend = df.dropna(subset=[c_ext]).copy().reset_index(drop=True)
+                        df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
                         df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
                         
                         fig_ext_trend = px.scatter(
@@ -852,12 +850,12 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_trend, use_container_width=True)
                 else:
-                    st.info("ℹ️ エクステンション（Extension）のデータが含まれていないか、有効な数値が存在しません。")
+                    st.info("ℹ️ エクステンションデータが存在しません。")
 
-                # --- 3Dスピンビジュアライザー ---
+                # --- ⚾️ 3Dスピンビジュアライザー（Rapsodo優先データ参照） ---
                 st.divider()
-                st.subheader("⚾️ 3D軌道")
-                valid_df = df.dropna(subset=['Pitch Type', c_dir, c_rev])
+                st.subheader("⚾️ 3D軌道（Rapsodo回転データ参照）")
+                valid_df = df_rot_source.dropna(subset=['Pitch Type', c_dir, c_rev])
                 
                 if not valid_df.empty:
                     available_types = sorted(valid_df['Pitch Type'].dropna().unique())
@@ -871,7 +869,6 @@ with tab1:
                     
                     st.write(f"**{sel_type}** の平均データ： 回転数 {avg_rpm:.0f} RPM / 効率 {avg_eff:.1f}% / Tilt {avg_tilt_str}")
                     
-                    # 3D回転座標計算
                     t = np.linspace(0, 2 * np.pi, 200)
                     alpha = 0.4
                     sx, sy, sz = np.cos(t) + alpha * np.cos(3*t), np.sin(t) - alpha * np.sin(3*t), 2 * np.sqrt(alpha * (1 - alpha)) * np.sin(2*t)
