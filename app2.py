@@ -129,33 +129,59 @@ PLAYER_HANDS = {
 
 # --- 🎨 視認性重視・高コントラスト球種カラーマップ ---
 COLOR_MAP_PITCH = {
-    # 🔴 ストレート系（赤）
+    # 🔴 1. ストレート系（赤）
     "Straight": "#E60000", "Fastball": "#E60000", "ストレート": "#E60000", "四縫線": "#E60000", "4-Seam": "#E60000", "Four-Seam": "#E60000",
     
-    # 💗 ツーシーム・シンカー系（ディープピンク）
-    "Sinker": "#FF1493", "SI": "#FF1493", "シンカー": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493",
-    
-    # 🟡 スライダー系（イエローゴールド：くっきりした黄色）
-    "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700",
-    
-    # 🟧 カットボール系（オレンジレッド / 朱色：スライダーと明確に区別）
-    "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
-    
-    # 🔵 スプリット・フォーク系（コバルトブルー）
-    "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
-    
-    # 🟢 チェンジアップ系（エメラルドグリーン）
-    "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
-    
-    # 🟦 カーブ系（ダークネイビー）
+    # 🟦 2. カーブ系（ダークネイビー）
     "Curve": "#000080", "Curveball": "#000080", "CurveBall": "#000080", "CU": "#000080", "カーブ": "#000080",
     
-    # 🟣 スイーパー系（パープル）
-    "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2"
+    # 🟡 3. スライダー系（イエローゴールド）
+    "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700", "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2",
+    
+    # 🟧 4. カットボール系（オレンジレッド / 朱色）
+    "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
+    
+    # 🔵 5. フォーク・スプリット系（コバルトブルー）
+    "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
+    
+    # 🟢 6. チェンジアップ系（エメラルドグリーン）
+    "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
+    
+    # 💗 7. ツーシーム・シンカー系（ディープピンク）
+    "Sinker": "#FF1493", "SI": "#FF1493", "シンカー": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493"
 }
 
+# --- ランク定義（表示優先順序） ---
+PITCH_ORDER_RANK = {
+    # 1. ストレート
+    "straight": 1, "fastball": 1, "ストレート": 1, "四縫線": 1, "4-seam": 1, "four-seam": 1,
+    # 2. カーブ
+    "curve": 2, "curveball": 2, "cu": 2, "カーブ": 2,
+    # 3. スライダー
+    "slider": 3, "sl": 3, "スライダー": 3, "sweeper": 3, "スイーパー": 3,
+    # 4. カットボール
+    "cutter": 4, "cut": 4, "カット": 4, "カットボール": 4,
+    # 5. フォーク / スプリット
+    "split": 5, "splitter": 5, "スプリット": 5, "フォーク": 5, "fs": 5,
+    # 6. チェンジアップ
+    "changeup": 6, "ch": 6, "チェンジアップ": 6,
+    # 7. ツーシーム / シンカー
+    "sinker": 7, "si": 7, "シンカー": 7, "twoseam": 7, "two-seam": 7, "two seam": 7, "ツーシーム": 7
+}
+
+def get_pitch_rank(pitch_type_str):
+    """球種から表示順位（1〜8）を取得"""
+    if not pitch_type_str or pd.isna(pitch_type_str):
+        return 99
+    pt_norm = str(pitch_type_str).strip().lower()
+    return PITCH_ORDER_RANK.get(pt_norm, 98)
+
+def sort_pitch_types(pitch_types_list):
+    """球種リストを指定された表示順序に従ってソート"""
+    return sorted(list(set(pitch_types_list)), key=lambda x: (get_pitch_rank(x), str(x)))
+
 def get_pitch_color(pitch_type_str):
-    """球種名から色を取得（大文字小文字・部分一致に対応）"""
+    """球種名から色を取得"""
     if not pitch_type_str or pd.isna(pitch_type_str):
         return "#808080"
     pt = str(pitch_type_str).strip()
@@ -413,7 +439,7 @@ with tab2:
                 
                 elif del_scope == "指定した球種のみ削除":
                     if 'Pitch Type' in target_df.columns:
-                        avail_types = sorted(target_df['Pitch Type'].dropna().unique().tolist())
+                        avail_types = sort_pitch_types(target_df['Pitch Type'].dropna().unique().tolist())
                         sel_pt = st.selectbox("削除したい球種を選択", avail_types, key="del_pt_select")
                         
                         final_delete_mask = delete_target_mask & (db_df['Pitch Type'] == sel_pt)
@@ -632,8 +658,17 @@ with tab1:
                     f"{c_ext}_mean": "エクステンション (m)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
+                
+                # --- 📌 平均データサマリーのソート処理（指定球種順） ---
+                stats_df['sort_rank'] = stats_df['Pitch Type'].apply(get_pitch_rank)
+                stats_df = stats_df.sort_values(by=['sort_rank', 'Pitch Type']).drop(columns=['sort_rank']).reset_index(drop=True)
+                
                 st.dataframe(stats_df.style.format(precision=2), use_container_width=True)
                 
+                # 表示中の全球種を取得して順序ソート
+                active_pitch_types = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist()) if not df_pos_source.empty else []
+                category_orders_dict = {"Pitch Type": active_pitch_types}
+
                 # --- 📈 変化量マップ（Trackman基準） ---
                 st.divider()
                 st.subheader("📈 変化量マップ（Trackman基準）")
@@ -652,7 +687,8 @@ with tab1:
                         color='Pitch Type', 
                         range_x=[-60, 60], 
                         range_y=[-60, 60], 
-                        color_discrete_map=COLOR_MAP_PITCH, 
+                        color_discrete_map=COLOR_MAP_PITCH,
+                        category_orders=category_orders_dict,
                         hover_data=hover_items
                     )
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
@@ -662,7 +698,16 @@ with tab1:
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
-                    fig_avg = px.scatter(pos_stats, x=c_hb, y=c_vb, color='Pitch Type', range_x=[-60, 60], range_y=[-60, 60], color_discrete_map=COLOR_MAP_PITCH)
+                    fig_avg = px.scatter(
+                        pos_stats, 
+                        x=c_hb, 
+                        y=c_vb, 
+                        color='Pitch Type', 
+                        range_x=[-60, 60], 
+                        range_y=[-60, 60], 
+                        color_discrete_map=COLOR_MAP_PITCH,
+                        category_orders=category_orders_dict
+                    )
                     fig_avg.update_traces(marker=dict(size=15))
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
@@ -695,6 +740,7 @@ with tab1:
                             range_y=y_range,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict,
                             hover_data=hover_items_rel
                         )
                         add_pitcher_url_background(fig_rel_all, is_right_hand)
@@ -733,7 +779,8 @@ with tab1:
                             range_x=x_range,
                             range_y=y_range,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
-                            color_discrete_map=COLOR_MAP_PITCH
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict
                         )
                         add_pitcher_url_background(fig_rel_avg, is_right_hand)
                         
@@ -759,7 +806,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_rel_avg, use_container_width=True)
 
-                    # 3. 球種別リリース範囲（統一指定カラー・コントラスト強化）
+                    # 3. 球種別リリース範囲（ソート順・統一指定カラー対応）
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -769,7 +816,12 @@ with tab1:
                         valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs, 'Pitch Type'])
                         shapes_list = []
                         
-                        for pt, group in valid_rel_df.groupby('Pitch Type'):
+                        # 指定された球種順でループ
+                        grouped_pt = {pt: grp for pt, grp in valid_rel_df.groupby('Pitch Type')}
+                        ordered_pts = sort_pitch_types(list(grouped_pt.keys()))
+                        
+                        for pt in ordered_pts:
+                            group = grouped_pt[pt]
                             if len(group) >= 1:
                                 mean_x = float(group[c_rs].mean())
                                 mean_y = float(group[c_rh].mean())
@@ -833,7 +885,8 @@ with tab1:
                             color='Pitch Type',
                             points="all",
                             labels={c_ext: 'エクステンション [m]', 'Pitch Type': '球種'},
-                            color_discrete_map=COLOR_MAP_PITCH
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict
                         )
                         fig_ext_box.update_layout(
                             plot_bgcolor='white',
@@ -855,6 +908,7 @@ with tab1:
                             color='Pitch Type',
                             labels={'Pitch_Index': '投球数 (球目)', c_ext: 'エクステンション [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict,
                             hover_data=['Date', c_vel]
                         )
                         fig_ext_trend.add_trace(go.Scatter(
@@ -880,7 +934,7 @@ with tab1:
                 valid_df = df_rot_source.dropna(subset=['Pitch Type', c_dir, c_rev])
                 
                 if not valid_df.empty:
-                    available_types = sorted(valid_df['Pitch Type'].dropna().unique())
+                    available_types = sort_pitch_types(valid_df['Pitch Type'].dropna().unique().tolist())
                     sel_type = st.selectbox("球種を選択して回転を確認:", available_types, key="pitch_viz_select")
                     
                     subset = valid_df[valid_df['Pitch Type'] == sel_type]
