@@ -77,8 +77,14 @@ def load_data_from_github(file_path):
         download_url = content["download_url"]
         file_res = requests.get(download_url)
         df = pd.read_excel(io.BytesIO(file_res.content))
+        
+        # 球種の表記ゆれ・変換処理
+        replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
         if 'TaggedPitchType' in df.columns:
-            df['TaggedPitchType'] = df['TaggedPitchType'].replace('Sinker', 'Two seam')
+            df['TaggedPitchType'] = df['TaggedPitchType'].replace(replace_dict)
+        if 'Pitch Type' in df.columns:
+            df['Pitch Type'] = df['Pitch Type'].replace(replace_dict)
+            
         return df
     else:
         return pd.DataFrame()
@@ -137,7 +143,7 @@ COLOR_MAP_PITCH = {
     "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
     "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
     "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
-    "Sinker": "#FF1493", "SI": "#FF1493", "シンカー": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493"
+    "Sinker": "#FF1493", "2seam": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493"
 }
 
 PITCH_ORDER_RANK = {
@@ -147,7 +153,7 @@ PITCH_ORDER_RANK = {
     "cutter": 4, "cut": 4, "カット": 4, "カットボール": 4,
     "split": 5, "splitter": 5, "スプリット": 5, "フォーク": 5, "fs": 5,
     "changeup": 6, "ch": 6, "チェンジアップ": 6,
-    "sinker": 7, "si": 7, "シンカー": 7, "twoseam": 7, "two-seam": 7, "two seam": 7, "ツーシーム": 7
+    "sinker": 7, "2seam": 7, "si": 7, "シンカー": 7, "twoseam": 7, "two-seam": 7, "two seam": 7, "ツーシーム": 7
 }
 
 def get_pitch_rank(pitch_type_str):
@@ -374,6 +380,13 @@ with tab2:
                         new_df['Date'] = target_date.strftime('%Y-%m-%d')
                         new_df['Data Type'] = data_type
                         new_df['Data Source'] = data_source
+                        
+                        # 球種の表記ゆれ・変換処理
+                        replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
+                        if 'Pitch Type' in new_df.columns:
+                            new_df['Pitch Type'] = new_df['Pitch Type'].replace(replace_dict)
+                        if 'TaggedPitchType' in new_df.columns:
+                            new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(replace_dict)
                         
                         cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension']
                         for c in cols_to_num:
@@ -716,7 +729,7 @@ with tab1:
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
-                    st.plotly_chart(fig_all, use_container_width=False, key="chart_hb_vb_all") # 🔑 keyを追加
+                    st.plotly_chart(fig_all, use_container_width=False, key="chart_hb_vb_all")
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
@@ -734,7 +747,7 @@ with tab1:
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
-                    st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg") # 🔑 keyを追加
+                    st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
 
                 # --- 📍 リリース位置プロット（Trackman基準） ---
                 st.divider()
@@ -786,7 +799,7 @@ with tab1:
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_all.update_layout(**common_release_layout)
-                        st.plotly_chart(fig_rel_all, use_container_width=True, key="chart_rel_all") # 🔑 keyを追加
+                        st.plotly_chart(fig_rel_all, use_container_width=True, key="chart_rel_all")
                         
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
@@ -818,7 +831,7 @@ with tab1:
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(**common_release_layout)
-                        st.plotly_chart(fig_rel_avg, use_container_width=True, key="chart_rel_avg") # 🔑 keyを追加
+                        st.plotly_chart(fig_rel_avg, use_container_width=True, key="chart_rel_avg")
 
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
@@ -873,7 +886,7 @@ with tab1:
                         layout_args_range = common_release_layout.copy()
                         layout_args_range['shapes'] = shapes_list
                         fig_rel_range.update_layout(**layout_args_range)
-                        st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range") # 🔑 keyを追加
+                        st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
@@ -915,7 +928,7 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
-                        st.plotly_chart(fig_ext_scatter, use_container_width=True, key="chart_ext_scatter") # 🔑 keyを追加
+                        st.plotly_chart(fig_ext_scatter, use_container_width=True, key="chart_ext_scatter")
                         
                     with ext_col2:
                         st.write("▼ 球種別平均（エクステンション × リリース高さ）")
@@ -946,7 +959,7 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
-                        st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg") # 🔑 keyを追加
+                        st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
 
                     st.write("▼ 投球順エクステンション推移 [m]")
                     df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
@@ -975,7 +988,7 @@ with tab1:
                         yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
                         xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                     )
-                    st.plotly_chart(fig_ext_trend, use_container_width=True, key="chart_ext_trend") # 🔑 keyを追加
+                    st.plotly_chart(fig_ext_trend, use_container_width=True, key="chart_ext_trend")
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
 
