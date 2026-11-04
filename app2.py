@@ -716,7 +716,7 @@ with tab1:
                     fig_all.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
-                    st.plotly_chart(fig_all, use_container_width=False)
+                    st.plotly_chart(fig_all, use_container_width=False, key="chart_hb_vb_all") # 🔑 keyを追加
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
@@ -734,7 +734,7 @@ with tab1:
                     fig_avg.add_hline(y=0, line_dash="dash", line_color="black")
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
-                    st.plotly_chart(fig_avg, use_container_width=False)
+                    st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg") # 🔑 keyを追加
 
                 # --- 📍 リリース位置プロット（Trackman基準） ---
                 st.divider()
@@ -748,9 +748,8 @@ with tab1:
                         hover_items_rel.append('Data Source')
                         
                     x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
-                    y_range = [1.0, 2.2]  # 🎯 Y軸のmaxを2.2に設定
+                    y_range = [1.0, 2.2]
                     
-                    # 🎯 scaleanchor="x", scaleratio=1 を設定してX軸1mとY軸1mの長さを完全に統一
                     common_release_layout = dict(
                         plot_bgcolor='white',
                         height=400,
@@ -787,7 +786,7 @@ with tab1:
                         fig_rel_all.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_all.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_all.update_layout(**common_release_layout)
-                        st.plotly_chart(fig_rel_all, use_container_width=True)
+                        st.plotly_chart(fig_rel_all, use_container_width=True, key="chart_rel_all") # 🔑 keyを追加
                         
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
@@ -819,7 +818,7 @@ with tab1:
                         fig_rel_avg.add_hline(y=0, line_width=2, line_color="black")
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(**common_release_layout)
-                        st.plotly_chart(fig_rel_avg, use_container_width=True)
+                        st.plotly_chart(fig_rel_avg, use_container_width=True, key="chart_rel_avg") # 🔑 keyを追加
 
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
@@ -874,7 +873,7 @@ with tab1:
                         layout_args_range = common_release_layout.copy()
                         layout_args_range['shapes'] = shapes_list
                         fig_rel_range.update_layout(**layout_args_range)
-                        st.plotly_chart(fig_rel_range, use_container_width=True)
+                        st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range") # 🔑 keyを追加
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
@@ -916,7 +915,7 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
-                        st.plotly_chart(fig_ext_scatter, use_container_width=True)
+                        st.plotly_chart(fig_ext_scatter, use_container_width=True, key="chart_ext_scatter") # 🔑 keyを追加
                         
                     with ext_col2:
                         st.write("▼ 球種別平均（エクステンション × リリース高さ）")
@@ -947,7 +946,7 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', dtick=0.5, title='エクステンション [m]'),
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
-                        st.plotly_chart(fig_ext_avg, use_container_width=True)
+                        st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg") # 🔑 keyを追加
 
                     st.write("▼ 投球順エクステンション推移 [m]")
                     df_ext_trend = df_pos_source.dropna(subset=[c_ext]).copy().reset_index(drop=True)
@@ -976,7 +975,7 @@ with tab1:
                         yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
                         xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                     )
-                    st.plotly_chart(fig_ext_trend, use_container_width=True)
+                    st.plotly_chart(fig_ext_trend, use_container_width=True, key="chart_ext_trend") # 🔑 keyを追加
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
 
