@@ -128,6 +128,10 @@ if 'pitch_df' not in st.session_state:
     with st.spinner("GitHubから最新の投球データを読み込み中..."):
         st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
 
+# アップロード中のロック状態管理
+if 'is_uploading' not in st.session_state:
+    st.session_state['is_uploading'] = False
+
 PLAYER_HANDS = {
     "#11 大栄 陽斗": "右", "#12 村上 崚久": "右", "#13 細川 拓哉": "右", 
     "#14 ヴァデルナ・フェルガス": "左", "#15 渕上 佳輝": "右", "#16 後藤 凌寿": "右", 
@@ -210,6 +214,26 @@ def time_to_degrees(time_str):
         return ((hh % 12) * 60 + mm) * 0.5
     except:
         return 0.0
+
+def extract_date_from_filename(filename):
+    """ファイル名から日付（YYYY-MM-DD）を自動抽出する関数"""
+    match_hyphen = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', filename)
+    if match_hyphen:
+        y, m, d = match_hyphen.groups()
+        try:
+            return date(int(y), int(m), int(d)).strftime('%Y-%m-%d')
+        except:
+            pass
+            
+    match_8 = re.search(r'(\d{4})(\d{2})(\d{2})', filename)
+    if match_8:
+        y, m, d = match_8.groups()
+        try:
+            return date(int(y), int(m), int(d)).strftime('%Y-%m-%d')
+        except:
+            pass
+            
+    return date.today().strftime('%Y-%m-%d')
 
 @st.cache_data(ttl=3600)
 def get_processed_silhouette_b64(is_right_handed=True):
@@ -322,100 +346,163 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
+    # アップロード中は操作モード切替もロック
     op_mode = st.radio(
         "行う操作を選択してください",
         ["📥 新規データの追加登録", "🗑️ 登録済みデータの選択削除"],
         horizontal=True,
-        key="pitch_manage_op_mode"
+        key="pitch_manage_op_mode",
+        disabled=st.session_state['is_uploading']
     )
     
     st.divider()
 
     if op_mode == "📥 新規データの追加登録":
-        st.subheader("📥 投球データのアップロード")
+        st.subheader("📥 投球データの複数ファイル一括アップロード")
         
-        col_reg1, col_reg2, col_reg3 = st.columns(3)
+        # 選手選択（アップロード中は disabled=True で完全にロック）
+        col_reg1, col_reg2 = st.columns(2)
         with col_reg1:
-            target_player = st.selectbox("対象の選手を選択", sorted(list(PLAYER_HANDS.keys())), key="pitch_reg_p")
+            target_player = st.selectbox(
+                "対象の選手を選択", 
+                sorted(list(PLAYER_HANDS.keys())), 
+                key="pitch_reg_p",
+                disabled=st.session_state['is_uploading']
+            )
         with col_reg2:
-            target_date = st.date_input("対象の日付を選択", date.today(), key="pitch_reg_d")
-        with col_reg3:
-            data_type = st.radio("練習種別（試合区別）", ["ブルペン", "シートBT"], horizontal=True, key="pitch_reg_type")
+            data_type = st.radio(
+                "練習種別（試合区別）", 
+                ["ブルペン", "シートBT"], 
+                horizontal=True, 
+                key="pitch_reg_type",
+                disabled=st.session_state['is_uploading']
+            )
         
-        data_source = st.radio("アップロードするデータの種類（計測機器）を選択", ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], horizontal=True, key="pitch_reg_source")
-        uploaded_file = st.file_uploader("投球データファイルをアップロード (.csv / .xlsx)", type=['csv', 'xlsx', 'xls'], key="pitch_file_uploader")
+        data_source = st.radio(
+            "アップロードするデータの種類（計測機器）を選択", 
+            ["Trackman（トラックマン）", "Rapsodo（ラプソード）"], 
+            horizontal=True, 
+            key="pitch_reg_source",
+            disabled=st.session_state['is_uploading']
+        )
         
-        if uploaded_file is not None:
-            if st.button("🚀 投球データをGitHubへ保存", key="btn_save_pitch", use_container_width=True):
-                with st.spinner("データを処理してGitHubへ同期保存中..."):
-                    try:
-                        file_ext = os.path.splitext(uploaded_file.name)[-1].lower()
-                        if file_ext == '.csv':
-                            bytes_data = uploaded_file.getvalue()
-                            try:
-                                text_data = bytes_data.decode('utf-8')
-                                enc = 'utf-8'
-                            except UnicodeDecodeError:
-                                text_data = bytes_data.decode('shift-jis', errors='ignore')
-                                enc = 'shift-jis'
+        # 複数ファイルを選択できるように accept_multiple_files=True を指定
+        uploaded_files = st.file_uploader(
+            "投球データファイルを複数選択してアップロード (.csv / .xlsx)", 
+            type=['csv', 'xlsx', 'xls'], 
+            accept_multiple_files=True, 
+            key="pitch_file_uploader",
+            disabled=st.session_state['is_uploading']
+        )
+        
+        if uploaded_files:
+            st.info(f"📁 選択されたファイル数: {len(uploaded_files)}件（ファイル名から日付を自動判別します）")
+            
+            # プレビュー表示
+            preview_data = []
+            for f in uploaded_files:
+                parsed_date = extract_date_from_filename(f.name)
+                preview_data.append({"ファイル名": f.name, "自動判別された日付": parsed_date})
+            st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
+            
+            if st.button("🚀 投球データを一括登録する", key="btn_save_pitch", disabled=st.session_state['is_uploading'], type="primary", use_container_width=True):
+                # ロック開始
+                st.session_state['is_uploading'] = True
+                st.rerun()
+
+        # アップロード処理の実行（ロック状態のとき裏で自動実行）
+        if st.session_state['is_uploading'] and uploaded_files:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            try:
+                total_files = len(uploaded_files)
+                latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+                updated_db = latest_db.copy() if not latest_db.empty else pd.DataFrame()
+                
+                success_count = 0
+                for idx, uploaded_file in enumerate(uploaded_files):
+                    file_name = uploaded_file.name
+                    target_date_str = extract_date_from_filename(file_name)
+                    status_text.text(f"⏳ 処理中 ({idx+1}/{total_files}): {file_name} (日付: {target_date_str}) を処理しています...")
+                    
+                    file_ext = os.path.splitext(file_name)[-1].lower()
+                    if file_ext == '.csv':
+                        bytes_data = uploaded_file.getvalue()
+                        try:
+                            text_data = bytes_data.decode('utf-8')
+                        except UnicodeDecodeError:
+                            text_data = bytes_data.decode('shift-jis', errors='ignore')
+                            
+                        lines = text_data.splitlines()
+                        skip = 0
+                        for line_idx, line in enumerate(lines):
+                            if ('"No"' in line) or ('"Pitch Type"' in line) or ('PitchNo' in line):
+                                skip = line_idx
+                                break
                                 
-                            lines = text_data.splitlines()
-                            skip = 0
-                            for idx, line in enumerate(lines):
-                                if ('"No"' in line) or ('"Pitch Type"' in line) or ('PitchNo' in line):
-                                    skip = idx
-                                    break
-                                    
-                            new_df = pd.read_csv(io.StringIO(text_data), skiprows=skip)
-                        else:
-                            temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
-                            skip = 0
-                            for idx, row in temp_df.iterrows():
-                                row_str = str(row.values)
-                                if 'No' in row_str or 'PitchType' in row_str or 'PitchNo' in row_str:
-                                    skip = idx
-                                    break
-                            uploaded_file.seek(0)
-                            new_df = pd.read_excel(uploaded_file, skiprows=skip)
-                            
-                        new_df = new_df.rename(columns=COLUMN_MAP)
-                        new_df['Player Name'] = target_player
-                        new_df['Date'] = target_date.strftime('%Y-%m-%d')
-                        new_df['Data Type'] = data_type
-                        new_df['Data Source'] = data_source
+                        new_df = pd.read_csv(io.StringIO(text_data), skiprows=skip)
+                    else:
+                        temp_df = pd.read_excel(uploaded_file, nrows=15, header=None)
+                        skip = 0
+                        for line_idx, row in temp_df.iterrows():
+                            row_str = str(row.values)
+                            if 'No' in row_str or 'PitchType' in row_str or 'PitchNo' in row_str:
+                                skip = line_idx
+                                break
+                        uploaded_file.seek(0)
+                        new_df = pd.read_excel(uploaded_file, skiprows=skip)
                         
-                        # 球種の表記ゆれ・変換処理
-                        replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
-                        if 'Pitch Type' in new_df.columns:
-                            new_df['Pitch Type'] = new_df['Pitch Type'].replace(replace_dict)
-                        if 'TaggedPitchType' in new_df.columns:
-                            new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(replace_dict)
+                    new_df = new_df.rename(columns=COLUMN_MAP)
+                    new_df['Player Name'] = target_player
+                    new_df['Date'] = target_date_str
+                    new_df['Data Type'] = data_type
+                    new_df['Data Source'] = data_source
+                    
+                    # 球種の表記ゆれ・変換処理
+                    replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
+                    if 'Pitch Type' in new_df.columns:
+                        new_df['Pitch Type'] = new_df['Pitch Type'].replace(replace_dict)
+                    if 'TaggedPitchType' in new_df.columns:
+                        new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(replace_dict)
+                    
+                    cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
+                    for c in cols_to_num:
+                        if c in new_df.columns:
+                            new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
+                    
+                    # 該当選手・日付・練習種別の既存データを削除してマージ
+                    if not updated_db.empty and all(col in updated_db.columns for col in ['Player Name', 'Date', 'Data Type']):
+                        target_condition = (
+                            (updated_db['Player Name'] == target_player) & 
+                            (updated_db['Date'] == target_date_str) & 
+                            (updated_db['Data Type'] == data_type)
+                        )
+                        updated_db = updated_db[~target_condition]
+                        updated_db = pd.concat([updated_db, new_df], ignore_index=True)
+                    else:
+                        updated_db = new_df
                         
-                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
-                        for c in cols_to_num:
-                            if c in new_df.columns:
-                                new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
-                        
-                        latest_db = load_data_from_github(GITHUB_PITCH_FILE_PATH)
-                        if not latest_db.empty:
-                            target_condition = (
-                                (latest_db['Player Name'] == target_player) & 
-                                (latest_db['Date'] == target_date.strftime('%Y-%m-%d')) & 
-                                (latest_db['Data Type'] == data_type)
-                            )
-                            modified_db = latest_db[~target_condition]
-                            updated_db = pd.concat([modified_db, new_df], ignore_index=True)
-                        else:
-                            updated_db = new_df
-                            
-                        success, message = save_to_github_direct(updated_db, GITHUB_PITCH_FILE_PATH, f"Add pitch data: {target_player}")
-                        if success:
-                            st.success(f"✅ {target_player} のデータを [{data_source} - {data_type}] としてGitHubへ保存しました！")
-                            st.balloons()
-                        else:
-                            st.error(f"❌ GitHubへの保存に失敗しました: {message}")
-                    except Exception as e:
-                        st.error(f"❌ 解析・保存エラー: {e}")
+                    success_count += 1
+                    progress_bar.progress((idx + 1) / total_files)
+                
+                # すべてのファイル処理が終わった後にGitHubへ一括保存
+                status_text.text("💾 GitHubへデータを同期保存中...")
+                success, message = save_to_github_direct(updated_db, GITHUB_PITCH_FILE_PATH, f"Batch add pitch data for {target_player}")
+                
+                if success:
+                    st.success(f"🎉 すべてのファイル ({success_count}件) の登録が正常に完了しました！次の選手を選択できるようになりました。")
+                    st.balloons()
+                else:
+                    st.error(f"❌ GitHubへの保存に失敗しました: {message}")
+                    
+            except Exception as e:
+                st.error(f"❌ 処理中にエラーが発生しました: {e}")
+            finally:
+                # ロック解除
+                st.session_state['is_uploading'] = False
+                time.sleep(1.5)
+                st.rerun()
 
     else:
         st.subheader("🗑️ 登録済みデータの選択・完全削除")
@@ -688,7 +775,6 @@ with tab1:
                     if c in df_base.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
-                # トラックマンデータから縦リリース角度をサマリーに含める
                 df_vra_summary = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
                 if c_vra in df_vra_summary.columns:
                     agg_dict[c_vra] = 'mean'
