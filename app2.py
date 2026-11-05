@@ -198,9 +198,8 @@ COLUMN_MAP = {
     'Extension (release)': 'Extension',
     'Extension [m]': 'Extension',
     'VertRelAngle': 'VertRelAngle',
-    'HorzRelAngle': 'HorzRelAngle',
-    'Vertical Release Angle': 'VertRelAngle',
-    'Horizontal Release Angle': 'HorzRelAngle'
+    'VerticalReleaseAngle': 'VertRelAngle',
+    'Vertical Release Angle': 'VertRelAngle'
 }
 
 def time_to_degrees(time_str):
@@ -392,7 +391,7 @@ with tab2:
                         if 'TaggedPitchType' in new_df.columns:
                             new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(replace_dict)
                         
-                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle']
+                        cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
                         for c in cols_to_num:
                             if c in new_df.columns:
                                 new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
@@ -629,7 +628,7 @@ with tab1:
             
         if not df_base.empty:
             df_base['ID'] = df_base.index
-            cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle', 'HorzRelAngle']
+            cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
             for c in cols_to_num:
                 if c in df_base.columns:
                     df_base[c] = pd.to_numeric(df_base[c].astype(str).str.replace('%', ''), errors='coerce')
@@ -685,10 +684,15 @@ with tab1:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
                 agg_dict = {}
-                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext, c_vra]:
+                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext]:
                     if c in df_base.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
+                # トラックマンデータから縦リリース角度をサマリーに含める
+                df_vra_summary = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+                if c_vra in df_vra_summary.columns:
+                    agg_dict[c_vra] = 'mean'
+
                 stats_df = df_base.groupby('Pitch Type').agg(agg_dict).reset_index()
                 stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
@@ -896,21 +900,23 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📐 縦リリース角度（VertRelAngle）分析セクション ---
+                # --- 📐 縦リリース角度（VertRelAngle）分析セクション（トラックマン基準） ---
                 st.divider()
-                st.subheader("📐 縦リリース角度分析 (Vertical Release Angle)")
+                st.subheader("📐 縦リリース角度分析 (Vertical Release Angle / トラックマン基準)")
                 
-                if c_vra in df_pos_source.columns and not df_pos_source[c_vra].dropna().empty:
+                df_vra_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
+                
+                if c_vra in df_vra_source.columns and not df_vra_source[c_vra].dropna().empty:
                     ang_col1, ang_col2 = st.columns(2)
                     
                     hover_items_ang = ['ID', 'Date', 'Data Type', c_vel, c_vra]
-                    if 'Data Source' in df_pos_source.columns: hover_items_ang.append('Data Source')
+                    if 'Data Source' in df_vra_source.columns: hover_items_ang.append('Data Source')
                     
                     with ang_col1:
                         st.write("▼ 投球別 縦リリース角度 [°]")
                         fig_vra_all = px.scatter(
-                            df_pos_source.dropna(subset=[c_vra]),
-                            x=df_pos_source.dropna(subset=[c_vra]).index,
+                            df_vra_source.dropna(subset=[c_vra]),
+                            x=df_vra_source.dropna(subset=[c_vra]).index,
                             y=c_vra,
                             color='Pitch Type',
                             labels={'x': '投球順 (ID)', c_vra: '縦リリース角度 [°]'},
@@ -929,7 +935,7 @@ with tab1:
                             
                     with ang_col2:
                         st.write("▼ 球種別平均 縦リリース角度 [°]")
-                        vra_avg_df = df_pos_source.dropna(subset=[c_vra]).groupby('Pitch Type').agg({c_vra: 'mean'}).reset_index()
+                        vra_avg_df = df_vra_source.dropna(subset=[c_vra]).groupby('Pitch Type').agg({c_vra: 'mean'}).reset_index()
                         
                         fig_vra_avg = px.bar(
                             vra_avg_df,
@@ -951,7 +957,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_vra_avg, use_container_width=True, key="chart_vert_rel_angle_avg")
                 else:
-                    st.info("ℹ️ 縦リリース角度（VertRelAngle）のデータが含まれていません。")
+                    st.info("ℹ️ トラックマンの縦リリース角度（VertRelAngle）データが含まれていません。")
 
                 # --- 📏 エクステンション分析セクション ---
                 st.divider()
