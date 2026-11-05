@@ -638,7 +638,7 @@ with tab1:
             is_right_hand = (hand == "右")
             
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
-            c_vra, c_hra = 'VertRelAngle', 'HorzRelAngle'
+            c_vra = 'VertRelAngle'
             
             # --- 変化量・リリース用データ (df_pos_source) ---
             if source_filter == "Trackmanのみ":
@@ -685,7 +685,7 @@ with tab1:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
                 agg_dict = {}
-                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext, c_vra, c_hra]:
+                for c in [c_vel, c_rev, c_eff, c_vb, c_hb, c_rh, c_rs, c_ext, c_vra]:
                     if c in df_base.columns:
                         agg_dict[c] = ['mean', 'max'] if c == c_vel else 'mean'
                 
@@ -698,7 +698,7 @@ with tab1:
                     f"{c_vb}_mean": "縦変化量 (VB)", f"{c_hb}_mean": "横変化量 (HB)",
                     f"{c_rh}_mean": "リリース高さ (m)", f"{c_rs}_mean": "リリース横位置 (m)",
                     f"{c_ext}_mean": "エクステンション (m)",
-                    f"{c_vra}_mean": "縦リリース角度 (°)", f"{c_hra}_mean": "横リリース角度 (°)"
+                    f"{c_vra}_mean": "縦リリース角度 (°)"
                 }
                 stats_df = stats_df.rename(columns=rename_dict)
                 
@@ -896,57 +896,62 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📐 リリース角度（VertRelAngle / HorzRelAngle）分析セクション ---
+                # --- 📐 縦リリース角度（VertRelAngle）分析セクション ---
                 st.divider()
-                st.subheader("📐 リリース角度分析（縦方向・横方向のリリース角度）")
+                st.subheader("📐 縦リリース角度分析 (Vertical Release Angle)")
                 
-                if (c_vra in df_pos_source.columns or c_hra in df_pos_source.columns) and not df_pos_source.dropna(subset=[c_vra], how='all').empty:
+                if c_vra in df_pos_source.columns and not df_pos_source[c_vra].dropna().empty:
                     ang_col1, ang_col2 = st.columns(2)
                     
-                    hover_items_ang = ['ID', 'Date', 'Data Type', c_vel]
-                    if c_vra in df_pos_source.columns: hover_items_ang.append(c_vra)
-                    if c_hra in df_pos_source.columns: hover_items_ang.append(c_hra)
+                    hover_items_ang = ['ID', 'Date', 'Data Type', c_vel, c_vra]
                     if 'Data Source' in df_pos_source.columns: hover_items_ang.append('Data Source')
                     
                     with ang_col1:
-                        if c_vra in df_pos_source.columns and not df_pos_source[c_vra].dropna().empty:
-                            st.write("▼ 縦リリース角度 (Vertical Release Angle)")
-                            fig_vra = px.scatter(
-                                df_pos_source.dropna(subset=[c_vra]),
-                                x=df_pos_source.dropna(subset=[c_vra]).index,
-                                y=c_vra,
-                                color='Pitch Type',
-                                labels={'x': '投球順 (ID)', c_vra: '縦リリース角度 [°]'},
-                                color_discrete_map=COLOR_MAP_PITCH,
-                                category_orders=category_orders_dict,
-                                hover_data=hover_items_ang
-                            )
-                            fig_vra.add_hline(y=0, line_dash="dash", line_color="gray")
-                            fig_vra.update_layout(plot_bgcolor='white', height=400, xaxis=dict(title='投球順 (ID)', gridcolor='lightgray'), yaxis=dict(title='縦リリース角度 [°]', gridcolor='lightgray'))
-                            st.plotly_chart(fig_vra, use_container_width=True, key="chart_vert_rel_angle")
-                        else:
-                            st.info("縦リリース角度（VertRelAngle）のデータがありません。")
+                        st.write("▼ 投球別 縦リリース角度 [°]")
+                        fig_vra_all = px.scatter(
+                            df_pos_source.dropna(subset=[c_vra]),
+                            x=df_pos_source.dropna(subset=[c_vra]).index,
+                            y=c_vra,
+                            color='Pitch Type',
+                            labels={'x': '投球順 (ID)', c_vra: '縦リリース角度 [°]'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict,
+                            hover_data=hover_items_ang
+                        )
+                        fig_vra_all.add_hline(y=0, line_dash="dash", line_color="gray")
+                        fig_vra_all.update_layout(
+                            plot_bgcolor='white', 
+                            height=400, 
+                            xaxis=dict(title='投球順 (ID)', gridcolor='lightgray'), 
+                            yaxis=dict(title='縦リリース角度 [°]', gridcolor='lightgray')
+                        )
+                        st.plotly_chart(fig_vra_all, use_container_width=True, key="chart_vert_rel_angle_all")
                             
                     with ang_col2:
-                        if c_hra in df_pos_source.columns and not df_pos_source[c_hra].dropna().empty:
-                            st.write("▼ 横リリース角度 (Horizontal Release Angle)")
-                            fig_hra = px.scatter(
-                                df_pos_source.dropna(subset=[c_hra]),
-                                x=df_pos_source.dropna(subset=[c_hra]).index,
-                                y=c_hra,
-                                color='Pitch Type',
-                                labels={'x': '投球順 (ID)', c_hra: '横リリース角度 [°]'},
-                                color_discrete_map=COLOR_MAP_PITCH,
-                                category_orders=category_orders_dict,
-                                hover_data=hover_items_ang
-                            )
-                            fig_hra.add_hline(y=0, line_dash="dash", line_color="gray")
-                            fig_hra.update_layout(plot_bgcolor='white', height=400, xaxis=dict(title='投球順 (ID)', gridcolor='lightgray'), yaxis=dict(title='横リリース角度 [°]', gridcolor='lightgray'))
-                            st.plotly_chart(fig_hra, use_container_width=True, key="chart_horz_rel_angle")
-                        else:
-                            st.info("横リリース角度（HorzRelAngle）のデータがありません。")
+                        st.write("▼ 球種別平均 縦リリース角度 [°]")
+                        vra_avg_df = df_pos_source.dropna(subset=[c_vra]).groupby('Pitch Type').agg({c_vra: 'mean'}).reset_index()
+                        
+                        fig_vra_avg = px.bar(
+                            vra_avg_df,
+                            x='Pitch Type',
+                            y=c_vra,
+                            color='Pitch Type',
+                            text_auto='.2f',
+                            labels={'Pitch Type': '球種', c_vra: '平均 縦リリース角度 [°]'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders=category_orders_dict
+                        )
+                        fig_vra_avg.add_hline(y=0, line_dash="dash", line_color="gray")
+                        fig_vra_avg.update_layout(
+                            plot_bgcolor='white', 
+                            height=400, 
+                            xaxis=dict(title='球種', gridcolor='lightgray'), 
+                            yaxis=dict(title='平均 縦リリース角度 [°]', gridcolor='lightgray'),
+                            showlegend=False
+                        )
+                        st.plotly_chart(fig_vra_avg, use_container_width=True, key="chart_vert_rel_angle_avg")
                 else:
-                    st.info("ℹ️ リリース角度（VertRelAngle / HorzRelAngle）のデータが含まれていません。")
+                    st.info("ℹ️ 縦リリース角度（VertRelAngle）のデータが含まれていません。")
 
                 # --- 📏 エクステンション分析セクション ---
                 st.divider()
