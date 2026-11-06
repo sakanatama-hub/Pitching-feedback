@@ -216,7 +216,18 @@ def time_to_degrees(time_str):
         return 0.0
 
 def extract_date_from_filename(filename):
-    """ファイル名から日付（YYYY-MM-DD）を自動抽出する関数"""
+    """ファイル名から日付（YYYY-MM-DD）を自動抽出する関数 (26.02.08 などの下二桁年.月.日形式に対応)"""
+    # パターン1: YY.MM.DD または YY-MM-DD または YY/MM/DD (例: 26.02.08)
+    match_yy = re.search(r'(\d{2})[./-](\d{1,2})[./-](\d{1,2})', filename)
+    if match_yy:
+        yy, m, d = match_yy.groups()
+        try:
+            full_year = 2000 + int(yy)
+            return date(full_year, int(m), int(d)).strftime('%Y-%m-%d')
+        except:
+            pass
+
+    # パターン2: YYYY-MM-DD または YYYY/MM/DD または YYYY年MM月DD日
     match_hyphen = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', filename)
     if match_hyphen:
         y, m, d = match_hyphen.groups()
@@ -225,6 +236,7 @@ def extract_date_from_filename(filename):
         except:
             pass
             
+    # パターン3: YYYYMMDD (8桁)
     match_8 = re.search(r'(\d{4})(\d{2})(\d{2})', filename)
     if match_8:
         y, m, d = match_8.groups()
