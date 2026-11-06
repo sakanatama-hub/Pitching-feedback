@@ -180,6 +180,41 @@ def get_pitch_color(pitch_type_str):
             return v
     return "#808080"
 
+def add_symbol_column(df, is_right_hand=True):
+    """球種に応じたプロット形状（Symbol）をデータフレームに追加する関数"""
+    if df.empty or 'Pitch Type' not in df.columns:
+        if 'Symbol' not in df.columns:
+            df['Symbol'] = 'circle'
+        return df
+    
+    symbols = []
+    cut_sym = 'triangle-left' if is_right_hand else 'triangle-right' # 右投手: ◀︎, 左投手: ▶︎
+    
+    for pt in df['Pitch Type']:
+        if pd.isna(pt):
+            symbols.append('circle')
+            continue
+        pt_lower = str(pt).strip().lower()
+        if any(k in pt_lower for k in ["straight", "fastball", "ストレート", "四縫線", "4-seam", "four-seam"]):
+            symbols.append('circle')        # ストレート: 丸
+        elif any(k in pt_lower for k in ["sinker", "2seam", "twoseam", "two-seam", "two seam", "ツーシーム"]):
+            symbols.append('star')          # ツーシーム: 星
+        elif any(k in pt_lower for k in ["slider", "sl", "スライダー", "sweeper", "スイーパー"]):
+            symbols.append('diamond')       # スライダー: ◆
+        elif any(k in pt_lower for k in ["cutter", "cut", "カット"]):
+            symbols.append(cut_sym)         # カット: ◀︎ / ▶︎
+        elif any(k in pt_lower for k in ["curve", "cu", "カーブ"]):
+            symbols.append('triangle-up')   # カーブ: ▲
+        elif any(k in pt_lower for k in ["changeup", "ch", "チェンジアップ"]):
+            symbols.append('square')        # チェンジ: ▫️
+        elif any(k in pt_lower for k in ["split", "splitter", "フォーク", "fs"]):
+            symbols.append('triangle-down') # フォーク: 下向き三角
+        else:
+            symbols.append('circle')
+            
+    df['Symbol'] = symbols
+    return df
+
 COLUMN_MAP = {
     'TaggedPitchType': 'Pitch Type', 'RelSpeed': 'Velocity', 'SpinRate': 'Spin Rate',
     'Tilt': 'Spin Direction', 'InducedVertBreak': 'VB', 'HorzBreak': 'HB',
@@ -727,25 +762,32 @@ with tab1:
             hand = PLAYER_HANDS.get(p_name, "右")
             is_right_hand = (hand == "右")
             
+            # 各種データフレームに球種シンボルを追加
+            df_base = add_symbol_column(df_base, is_right_hand)
+            
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
             c_vra = 'VertRelAngle'
             
             # --- 変化量・リリース用データ (df_pos_source) ---
             if source_filter == "Trackmanのみ":
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             elif source_filter == "Rapsodoのみ":
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
             else:
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
+
+            df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
 
             # --- 回転系・3D用データ (df_rot_source) ---
             if source_filter == "Rapsodoのみ":
-                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
+                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
             elif source_filter == "Trackmanのみ":
-                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+                df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             else:
                 rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
-                df_rot_source = rap_chk if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
+                df_rot_source = rap_chk.copy() if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
+
+            df_rot_source = add_symbol_column(df_rot_source, is_right_hand)
 
             # チーム平均算出（位置系はTrackman基準のチーム平均）
             df_team_calc = df_all.copy()
@@ -803,6 +845,7 @@ with tab1:
                 
                 active_pitch_types = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist()) if not df_pos_source.empty else []
                 category_orders_dict = {"Pitch Type": active_pitch_types}
+                symbol_map_dict = {s: s for s in df_pos_source['Symbol'].unique()} if 'Symbol' in df_pos_source.columns else {}
 
                 # --- 📈 変化量マップ（Trackman基準） ---
                 st.divider()
@@ -819,7 +862,9 @@ with tab1:
                         df_pos_source, 
                         x=c_hb, 
                         y=c_vb, 
-                        color='Pitch Type', 
+                        color='Pitch Type',
+                        symbol='Symbol',
+                        symbol_map=symbol_map_dict,
                         range_x=[-60, 60], 
                         range_y=[-60, 60], 
                         color_discrete_map=COLOR_MAP_PITCH,
@@ -833,11 +878,16 @@ with tab1:
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
+                    pos_stats = add_symbol_column(pos_stats, is_right_hand)
+                    pos_symbol_map = {s: s for s in pos_stats['Symbol'].unique()}
+                    
                     fig_avg = px.scatter(
                         pos_stats, 
                         x=c_hb, 
                         y=c_vb, 
                         color='Pitch Type', 
+                        symbol='Symbol',
+                        symbol_map=pos_symbol_map,
                         range_x=[-60, 60], 
                         range_y=[-60, 60], 
                         color_discrete_map=COLOR_MAP_PITCH,
@@ -878,6 +928,8 @@ with tab1:
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
+                            symbol='Symbol',
+                            symbol_map=symbol_map_dict,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict,
@@ -904,12 +956,16 @@ with tab1:
                     with rel_col2:
                         st.write("▼ 球種別平均リリース位置")
                         rel_stats = df_pos_source.groupby('Pitch Type').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                        rel_stats = add_symbol_column(rel_stats, is_right_hand)
+                        rel_stats_symbol_map = {s: s for s in rel_stats['Symbol'].unique()}
                         
                         fig_rel_avg = px.scatter(
                             rel_stats,
                             x=c_rs,
                             y=c_rh,
                             color='Pitch Type',
+                            symbol='Symbol',
+                            symbol_map=rel_stats_symbol_map,
                             labels={c_rs: '左右 [m]', c_rh: '高さ [m]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict
@@ -988,12 +1044,11 @@ with tab1:
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
 
-                    # --- 📍 月毎の平均リリース位置グラフ（球種別ではなく全球まとめ） ---
+                    # --- 📍 月毎の平均リリース位置グラフ ---
                     st.write("▼ 月毎の平均リリース位置（投手目線 / 全球まとめた月毎の平均）")
                     df_rel_month = df_pos_source.dropna(subset=[c_rh, c_rs, 'Date']).copy()
                     df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.to_period('M').astype(str)
                     
-                    # 球種で分けず、月ごとだけに絞って平均を計算
                     rel_month_avg = df_rel_month.groupby('Month').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
                     
                     fig_rel_month = px.scatter(
@@ -1046,6 +1101,8 @@ with tab1:
                             x=df_vra_source.dropna(subset=[c_vra]).index,
                             y=c_vra,
                             color='Pitch Type',
+                            symbol='Symbol',
+                            symbol_map={s: s for s in df_vra_source['Symbol'].unique()},
                             labels={'x': '投球順 (ID)', c_vra: '縦リリース角度 [°]'},
                             color_discrete_map=COLOR_MAP_PITCH,
                             category_orders=category_orders_dict,
@@ -1107,6 +1164,8 @@ with tab1:
                             x=c_ext,
                             y=c_rh,
                             color='Pitch Type',
+                            symbol='Symbol',
+                            symbol_map=symbol_map_dict,
                             range_x=ext_x_range,
                             range_y=ext_y_range,
                             labels={c_ext: 'エクステンション [m]', c_rh: '高さ [m]'},
@@ -1132,12 +1191,16 @@ with tab1:
                             c_ext: 'mean',
                             c_rh: 'mean'
                         }).reset_index()
+                        ext_avg_stats = add_symbol_column(ext_avg_stats, is_right_hand)
+                        ext_avg_symbol_map = {s: s for s in ext_avg_stats['Symbol'].unique()}
                         
                         fig_ext_avg = px.scatter(
                             ext_avg_stats,
                             x=c_ext,
                             y=c_rh,
                             color='Pitch Type',
+                            symbol='Symbol',
+                            symbol_map=ext_avg_symbol_map,
                             range_x=ext_x_range,
                             range_y=ext_y_range,
                             labels={c_ext: 'エクステンション [m]', c_rh: '高さ [m]'},
@@ -1157,7 +1220,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
 
-                    # --- 📏 月毎のエクステンション分析グラフ（2種類に変更） ---
+                    # --- 📏 月毎のエクステンション分析グラフ（2種類） ---
                     st.divider()
                     st.write("▼ 月毎のエクステンション推移グラフ（個別プロット ＆ 平均折れ線）")
                     
