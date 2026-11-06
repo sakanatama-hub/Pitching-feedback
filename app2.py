@@ -988,21 +988,21 @@ with tab1:
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
 
-                    # --- 📍 新規追加：月毎の平均リリース位置グラフ ---
-                    st.write("▼ 月毎の平均リリース位置（投手目線 / 1ヶ月ごとの平均）")
+                    # --- 📍 月毎の平均リリース位置グラフ（球種別ではなく全球まとめ） ---
+                    st.write("▼ 月毎の平均リリース位置（投手目線 / 全球まとめた月毎の平均）")
                     df_rel_month = df_pos_source.dropna(subset=[c_rh, c_rs, 'Date']).copy()
                     df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.to_period('M').astype(str)
-                    rel_month_avg = df_rel_month.groupby(['Month', 'Pitch Type']).agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                    
+                    # 球種で分けず、月ごとだけに絞って平均を計算
+                    rel_month_avg = df_rel_month.groupby('Month').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
                     
                     fig_rel_month = px.scatter(
                         rel_month_avg,
                         x=c_rs,
                         y=c_rh,
-                        color='Pitch Type',
-                        symbol='Month',
+                        color='Month',
+                        text='Month',
                         labels={c_rs: '左右 [m]', c_rh: '高さ [m]', 'Month': '月'},
-                        color_discrete_map=COLOR_MAP_PITCH,
-                        category_orders=category_orders_dict,
                         hover_data=['Month']
                     )
                     add_pitcher_url_background(fig_rel_month, is_right_hand)
@@ -1018,7 +1018,7 @@ with tab1:
                             hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                         ))
                     
-                    fig_rel_month.update_traces(marker=dict(size=14))
+                    fig_rel_month.update_traces(textposition='top center', marker=dict(size=16))
                     fig_rel_month.add_hline(y=0, line_width=2, line_color="black")
                     fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
                     fig_rel_month.update_layout(**common_release_layout)
@@ -1157,30 +1157,62 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
 
-                    # --- 📏 月毎のエクステンション平均グラフ（変更） ---
-                    st.write("▼ 月毎のエクステンション平均 [m]")
-                    df_ext_month = df_pos_source.dropna(subset=[c_ext, 'Date']).copy()
-                    df_ext_month['Month'] = pd.to_datetime(df_ext_month['Date']).dt.to_period('M').astype(str)
-                    ext_month_stats = df_ext_month.groupby(['Month', 'Pitch Type']).agg({c_ext: 'mean'}).reset_index()
+                    # --- 📏 月毎のエクステンション分析グラフ（2種類に変更） ---
+                    st.divider()
+                    st.write("▼ 月毎のエクステンション推移グラフ（個別プロット ＆ 平均折れ線）")
                     
-                    fig_ext_month = px.bar(
-                        ext_month_stats,
-                        x='Month',
-                        y=c_ext,
-                        color='Pitch Type',
-                        barmode='group',
-                        text_auto='.2f',
-                        labels={'Month': '月', c_ext: '平均エクステンション [m]'},
-                        color_discrete_map=COLOR_MAP_PITCH,
-                        category_orders=category_orders_dict
-                    )
-                    fig_ext_month.update_layout(
-                        plot_bgcolor='white',
-                        height=420,
-                        yaxis=dict(gridcolor='lightgray', title='平均エクステンション [m]'),
-                        xaxis=dict(gridcolor='lightgray', title='月')
-                    )
-                    st.plotly_chart(fig_ext_month, use_container_width=True, key="chart_ext_month_avg")
+                    df_ext_trend = df_pos_source.dropna(subset=[c_ext, 'Date']).copy()
+                    df_ext_trend['Month'] = pd.to_datetime(df_ext_trend['Date']).dt.to_period('M').astype(str)
+                    df_ext_trend = df_ext_trend.sort_values('Date').reset_index(drop=True)
+                    df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
+                    
+                    ext_sub_col1, ext_sub_col2 = st.columns(2)
+                    
+                    with ext_sub_col1:
+                        st.write("▼ 個別投球プロット（全投球の推移）")
+                        fig_ext_all_plot = px.scatter(
+                            df_ext_trend,
+                            x='Pitch_Index',
+                            y=c_ext,
+                            color='Month',
+                            labels={'Pitch_Index': '投球数 (球目)', c_ext: 'エクステンション [m]', 'Month': '月'},
+                            hover_data=['Date', c_vel, 'Pitch Type']
+                        )
+                        fig_ext_all_plot.add_trace(go.Scatter(
+                            x=df_ext_trend['Pitch_Index'],
+                            y=df_ext_trend[c_ext],
+                            mode='lines',
+                            line=dict(color='gray', width=1, dash='dot'),
+                            showlegend=False
+                        ))
+                        fig_ext_all_plot.update_layout(
+                            plot_bgcolor='white',
+                            height=400,
+                            yaxis=dict(gridcolor='lightgray', title='エクステンション [m]'),
+                            xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
+                        )
+                        st.plotly_chart(fig_ext_all_plot, use_container_width=True, key="chart_ext_all_plot")
+
+                    with ext_sub_col2:
+                        st.write("▼ 月毎の平均推移（平均プロットを線で繋いだグラフ）")
+                        ext_month_avg = df_ext_trend.groupby('Month').agg({c_ext: 'mean'}).reset_index()
+                        
+                        fig_ext_line = px.line(
+                            ext_month_avg,
+                            x='Month',
+                            y=c_ext,
+                            markers=True,
+                            labels={'Month': '月', c_ext: '平均エクステンション [m]'},
+                        )
+                        fig_ext_line.update_traces(line=dict(width=3, color='#E60000'), marker=dict(size=10))
+                        fig_ext_line.update_layout(
+                            plot_bgcolor='white',
+                            height=400,
+                            yaxis=dict(gridcolor='lightgray', title='平均エクステンション [m]'),
+                            xaxis=dict(gridcolor='lightgray', title='月')
+                        )
+                        st.plotly_chart(fig_ext_line, use_container_width=True, key="chart_ext_line_avg")
+
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
 
