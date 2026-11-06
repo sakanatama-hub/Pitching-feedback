@@ -217,7 +217,6 @@ def time_to_degrees(time_str):
 
 def extract_date_from_filename(filename):
     """ファイル名から日付（YYYY-MM-DD）を自動抽出する関数 (26.02.08 などの下二桁年.月.日形式に対応)"""
-    # パターン1: YY.MM.DD または YY-MM-DD または YY/MM/DD (例: 26.02.08)
     match_yy = re.search(r'(\d{2})[./-](\d{1,2})[./-](\d{1,2})', filename)
     if match_yy:
         yy, m, d = match_yy.groups()
@@ -227,7 +226,6 @@ def extract_date_from_filename(filename):
         except:
             pass
 
-    # パターン2: YYYY-MM-DD または YYYY/MM/DD または YYYY年MM月DD日
     match_hyphen = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', filename)
     if match_hyphen:
         y, m, d = match_hyphen.groups()
@@ -236,7 +234,6 @@ def extract_date_from_filename(filename):
         except:
             pass
             
-    # パターン3: YYYYMMDD (8桁)
     match_8 = re.search(r'(\d{4})(\d{2})(\d{2})', filename)
     if match_8:
         y, m, d = match_8.groups()
@@ -358,7 +355,12 @@ tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ�
 with tab2:
     st.header("📝 投手データ管理（登録・削除）")
     
-    # アップロード中は操作モード切替もロック
+    # 🟢🔴 わかりやすいステータス表示バナーを追加
+    if st.session_state['is_uploading']:
+        st.warning("⏳ **【現在：登録処理中（ロック中）】** データをGitHubへ一括保存しています。完了するまで他の操作や次の選手の選択はできません。")
+    else:
+        st.success("🟢 **【現在：登録可能】** 次の選手やファイルの選択が可能です。「一括登録する」ボタンを押してデータを登録してください。")
+
     op_mode = st.radio(
         "行う操作を選択してください",
         ["📥 新規データの追加登録", "🗑️ 登録済みデータの選択削除"],
@@ -372,7 +374,6 @@ with tab2:
     if op_mode == "📥 新規データの追加登録":
         st.subheader("📥 投球データの複数ファイル一括アップロード")
         
-        # 選手選択（アップロード中は disabled=True で完全にロック）
         col_reg1, col_reg2 = st.columns(2)
         with col_reg1:
             target_player = st.selectbox(
@@ -398,7 +399,6 @@ with tab2:
             disabled=st.session_state['is_uploading']
         )
         
-        # 複数ファイルを選択できるように accept_multiple_files=True を指定
         uploaded_files = st.file_uploader(
             "投球データファイルを複数選択してアップロード (.csv / .xlsx)", 
             type=['csv', 'xlsx', 'xls'], 
@@ -410,7 +410,6 @@ with tab2:
         if uploaded_files:
             st.info(f"📁 選択されたファイル数: {len(uploaded_files)}件（ファイル名から日付を自動判別します）")
             
-            # プレビュー表示
             preview_data = []
             for f in uploaded_files:
                 parsed_date = extract_date_from_filename(f.name)
@@ -418,11 +417,10 @@ with tab2:
             st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
             
             if st.button("🚀 投球データを一括登録する", key="btn_save_pitch", disabled=st.session_state['is_uploading'], type="primary", use_container_width=True):
-                # ロック開始
                 st.session_state['is_uploading'] = True
                 st.rerun()
 
-        # アップロード処理の実行（ロック状態のとき裏で自動実行）
+        # アップロード処理の実行
         if st.session_state['is_uploading'] and uploaded_files:
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -471,7 +469,6 @@ with tab2:
                     new_df['Data Type'] = data_type
                     new_df['Data Source'] = data_source
                     
-                    # 球種の表記ゆれ・変換処理
                     replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
                     if 'Pitch Type' in new_df.columns:
                         new_df['Pitch Type'] = new_df['Pitch Type'].replace(replace_dict)
@@ -483,7 +480,6 @@ with tab2:
                         if c in new_df.columns:
                             new_df[c] = pd.to_numeric(new_df[c].astype(str).str.replace('%', ''), errors='coerce')
                     
-                    # 該当選手・日付・練習種別の既存データを削除してマージ
                     if not updated_db.empty and all(col in updated_db.columns for col in ['Player Name', 'Date', 'Data Type']):
                         target_condition = (
                             (updated_db['Player Name'] == target_player) & 
@@ -498,7 +494,6 @@ with tab2:
                     success_count += 1
                     progress_bar.progress((idx + 1) / total_files)
                 
-                # すべてのファイル処理が終わった後にGitHubへ一括保存
                 status_text.text("💾 GitHubへデータを同期保存中...")
                 success, message = save_to_github_direct(updated_db, GITHUB_PITCH_FILE_PATH, f"Batch add pitch data for {target_player}")
                 
@@ -511,7 +506,6 @@ with tab2:
             except Exception as e:
                 st.error(f"❌ 処理中にエラーが発生しました: {e}")
             finally:
-                # ロック解除
                 st.session_state['is_uploading'] = False
                 time.sleep(1.5)
                 st.rerun()
