@@ -63,12 +63,26 @@ SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitchin
 # 🖼️ エクステンション用横向きイラストのRaw URL
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
-# 表記ゆれ統一用辞書（Spritter -> Splitter を追加）
+# 表記ゆれ・スプリット系完全統一用マッピング（大文字小文字対応）
 REPLACE_PITCH_DICT = {
     'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 
     'Sinker': '2seam', 
-    'Spritter': 'Splitter', 'Split': 'Splitter', 'スプリット': 'Splitter'
+    'Spritter': 'Splitter', 'spritter': 'Splitter', 'Split': 'Splitter', 'splitter': 'Splitter', 'スプリット': 'Splitter'
 }
+
+def standardize_pitch_types(df):
+    """データフレーム内の球種表記を完全統一する関数"""
+    if df.empty:
+        return df
+    
+    # 部分一致や大文字小文字のゆれも含めてSplitterに統一するための正規化
+    for col in ['Pitch Type', 'TaggedPitchType']:
+        if col in df.columns:
+            df[col] = df[col].replace(REPLACE_PITCH_DICT)
+            # 文字列としてスプリット系が含まれるものを強制置換
+            mask = df[col].astype(str).str.lower().isin(['spritter', 'split', 'スプリット'])
+            df.loc[mask, col] = 'Splitter'
+    return df
 
 def load_data_from_github(file_path):
     if not GITHUB_TOKEN:
@@ -85,12 +99,7 @@ def load_data_from_github(file_path):
         file_res = requests.get(download_url)
         df = pd.read_excel(io.BytesIO(file_res.content))
         
-        # 球種の表記ゆれ・変換処理
-        if 'TaggedPitchType' in df.columns:
-            df['TaggedPitchType'] = df['TaggedPitchType'].replace(REPLACE_PITCH_DICT)
-        if 'Pitch Type' in df.columns:
-            df['Pitch Type'] = df['Pitch Type'].replace(REPLACE_PITCH_DICT)
-            
+        df = standardize_pitch_types(df)
         return df
     else:
         return pd.DataFrame()
@@ -107,6 +116,8 @@ def save_to_github_direct(df_to_save, file_path, message_text="Update pitch data
     if res.status_code == 200:
         file_info = res.json()
         sha = file_info.get("sha")
+
+    df_to_save = standardize_pitch_types(df_to_save)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -508,10 +519,7 @@ with tab2:
                     new_df['Data Type'] = data_type
                     new_df['Data Source'] = data_source
                     
-                    if 'Pitch Type' in new_df.columns:
-                        new_df['Pitch Type'] = new_df['Pitch Type'].replace(REPLACE_PITCH_DICT)
-                    if 'TaggedPitchType' in new_df.columns:
-                        new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(REPLACE_PITCH_DICT)
+                    new_df = standardize_pitch_types(new_df)
                     
                     cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
                     for c in cols_to_num:
@@ -552,6 +560,7 @@ with tab2:
         st.subheader("🗑️ 登録済みデータの選択・完全削除")
         
         db_df = load_data_from_github(GITHUB_PITCH_FILE_PATH)
+        db_df = standardize_pitch_types(db_df)
         
         if db_df.empty:
             st.warning("現在、データベースに登録済みのデータが見つかりません。")
@@ -672,6 +681,7 @@ with tab1:
     st.header("投球解析フィードバック")
     
     df_all = st.session_state['pitch_df'].copy()
+    df_all = standardize_pitch_types(df_all)
     
     if df_all.empty:
         st.info("データが未登録か、GitHubからロードできませんでした。「投手データ登録・削除」タブからアップロードしてください。")
@@ -758,6 +768,7 @@ with tab1:
             df_base = pd.DataFrame()
             
         if not df_base.empty:
+            df_base = standardize_pitch_types(df_base)
             df_base['ID'] = df_base.index
             cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
             for c in cols_to_num:
@@ -781,6 +792,7 @@ with tab1:
             else:
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
 
+            df_pos_source = standardize_pitch_types(df_pos_source)
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
 
             # --- 回転系・3D用データ (df_rot_source) ---
@@ -792,10 +804,12 @@ with tab1:
                 rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
                 df_rot_source = rap_chk.copy() if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
 
+            df_rot_source = standardize_pitch_types(df_rot_source)
             df_rot_source = add_symbol_column(df_rot_source, is_right_hand)
 
             # チーム平均算出（位置系はTrackman基準のチーム平均）
             df_team_calc = df_all.copy()
+            df_team_calc = standardize_pitch_types(df_team_calc)
             for c in [c_rh, c_rs]:
                 if c in df_team_calc.columns:
                     df_team_calc[c] = pd.to_numeric(df_team_calc[c].astype(str).str.replace('%', ''), errors='coerce')
