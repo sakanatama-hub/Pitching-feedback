@@ -63,12 +63,12 @@ SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitchin
 # 🖼️ エクステンション用横向きイラストのRaw URL
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
-# 表記ゆれ・スプリット系完全統一用マッピング（大文字小文字対応 ＆ FBなどの追加）
+# 表記ゆれ・スプリット系およびFastball（ストレート）系完全統一用マッピング
 REPLACE_PITCH_DICT = {
     'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 
     'Sinker': '2seam', 
     'Spritter': 'Splitter', 'spritter': 'Splitter', 'Split': 'Splitter', 'splitter': 'Splitter', 'スプリット': 'Splitter',
-    'FB': 'Straight', 'Fastball': 'Straight', 'fastball': 'Straight', 'ストレート': 'Straight'
+    'Straight': 'Fastball', 'straight': 'Fastball', 'FB': 'Fastball', 'fb': 'Fastball', 'ストレート': 'Fastball', '四縫線': 'Fastball', '4-Seam': 'Fastball', 'Four-Seam': 'Fastball'
 }
 
 def standardize_pitch_types(df):
@@ -79,12 +79,11 @@ def standardize_pitch_types(df):
     for col in ['Pitch Type', 'TaggedPitchType']:
         if col in df.columns:
             df[col] = df[col].replace(REPLACE_PITCH_DICT)
-            # 部分一致や別表記の強制置換
             mask_split = df[col].astype(str).str.lower().isin(['spritter', 'split', 'スプリット'])
             df.loc[mask_split, col] = 'Splitter'
             
-            mask_straight = df[col].astype(str).str.lower().isin(['fb', 'fastball', 'ストレート'])
-            df.loc[mask_straight, col] = 'Straight'
+            mask_fastball = df[col].astype(str).str.lower().isin(['fb', 'straight', 'fastball', 'ストレート', '四縫線', '4-seam', 'four-seam'])
+            df.loc[mask_fastball, col] = 'Fastball'
     return df
 
 def load_data_from_github(file_path):
@@ -161,7 +160,7 @@ PLAYER_HANDS = {
 
 # --- 🎨 視認性重視・高コントラスト球種カラーマップ ---
 COLOR_MAP_PITCH = {
-    "Straight": "#E60000", "Fastball": "#E60000", "ストレート": "#E60000", "四縫線": "#E60000", "4-Seam": "#E60000", "Four-Seam": "#E60000",
+    "Fastball": "#E60000", "Straight": "#E60000", "ストレート": "#E60000", "四縫線": "#E60000", "4-Seam": "#E60000", "Four-Seam": "#E60000",
     "Curve": "#000080", "Curveball": "#000080", "CurveBall": "#000080", "CU": "#000080", "カーブ": "#000080",
     "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700", "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2",
     "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
@@ -171,7 +170,7 @@ COLOR_MAP_PITCH = {
 }
 
 PITCH_ORDER_RANK = {
-    "straight": 1, "fastball": 1, "ストレート": 1, "四縫線": 1, "4-seam": 1, "four-seam": 1,
+    "fastball": 1, "straight": 1, "ストレート": 1, "四縫線": 1, "4-seam": 1, "four-seam": 1,
     "curve": 2, "curveball": 2, "cu": 2, "カーブ": 2,
     "slider": 3, "sl": 3, "スライダー": 3, "sweeper": 3, "スイーパー": 3,
     "cutter": 4, "cut": 4, "カット": 4, "カットボール": 4,
@@ -215,8 +214,8 @@ def add_symbol_column(df, is_right_hand=True):
             symbols.append('circle')
             continue
         pt_lower = str(pt).strip().lower()
-        if any(k in pt_lower for k in ["straight", "fastball", "ストレート", "四縫線", "4-seam", "four-seam", "fb"]):
-            symbols.append('circle')        # ストレート: 丸
+        if any(k in pt_lower for k in ["fastball", "straight", "ストレート", "四縫線", "4-seam", "four-seam", "fb"]):
+            symbols.append('circle')        # ファストボール: 丸
         elif any(k in pt_lower for k in ["sinker", "2seam", "twoseam", "two-seam", "two seam", "ツーシーム"]):
             symbols.append('star')          # ツーシーム: 星
         elif any(k in pt_lower for k in ["slider", "sl", "スライダー", "sweeper", "スイーパー"]):
@@ -280,7 +279,6 @@ def extract_date_from_filename(filename):
             return date(full_year, int(m), int(d)).strftime('%Y-%m-%d')
         except:
             pass
-
     match_hyphen = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', filename)
     if match_hyphen:
         y, m, d = match_hyphen.groups()
@@ -304,12 +302,10 @@ def get_processed_silhouette_b64(is_right_handed=True):
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
-
     try:
         r = requests.get(SILHOUETTE_IMAGE_URL, headers=headers, timeout=5)
         if r.status_code != 200:
             return None
-
         img = Image.open(io.BytesIO(r.content)).convert("RGBA")
         datas = img.getdata()
         newData = []
@@ -334,12 +330,10 @@ def get_processed_extension_silhouette_b64():
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
-
     try:
         r = requests.get(EXTENSION_IMAGE_URL, headers=headers, timeout=5)
         if r.status_code != 200:
             return None
-
         img = Image.open(io.BytesIO(r.content)).convert("RGBA")
         datas = img.getdata()
         newData = []
@@ -365,7 +359,6 @@ def add_pitcher_url_background(fig, is_right_handed=True):
             x_min, x_max = -0.98, 0.42
             
         y_min, y_max = -0.88, 1.72
-
         fig.add_layout_image(
             dict(
                 source=img_src,
@@ -558,7 +551,6 @@ with tab2:
                 st.session_state['is_uploading'] = False
                 time.sleep(1.5)
                 st.rerun()
-
     else:
         st.subheader("🗑️ 登録済みデータの選択・完全削除")
         
@@ -631,7 +623,6 @@ with tab2:
                         st.error(f"🚨 **削除内容確認**: 【{del_selected_player}】 の **{s_date} ({s_type})** から **球種: {sel_pt}** ({del_cnt}件) を削除します。")
                     else:
                         st.warning("球種データが見つからないため一括削除を行います。")
-
                 elif del_scope == "特定の球を複数選んで削除 (複数選択可)":
                     preview_df = target_df.reset_index()
                     
@@ -641,7 +632,6 @@ with tab2:
                         pt = r['Pitch Type'] if 'Pitch Type' in r and pd.notna(r['Pitch Type']) else '不明'
                         vel = f"{r['Velocity']} km/h" if 'Velocity' in r and pd.notna(r['Velocity']) else ''
                         return f"ID:{row_idx} - 球種:{pt} {vel}"
-
                     selected_row_indices = st.multiselect(
                         "削除したい球（1球または複数球）を選択してください",
                         options=row_options,
@@ -655,7 +645,6 @@ with tab2:
                     else:
                         final_delete_mask = pd.Series(False, index=db_df.index)
                         st.info("💡 上記の選択ボックスから削除したい球を選択してください。")
-
                 st.markdown("---")
                 st.write("▼ 削除対象となるデータのプレビュー")
                 st.dataframe(db_df[final_delete_mask][['Player Name', 'Date', 'Data Type', 'Pitch Type', 'Velocity']].head(10), use_container_width=True)
@@ -777,7 +766,6 @@ with tab1:
             for c in cols_to_num:
                 if c in df_base.columns:
                     df_base[c] = pd.to_numeric(df_base[c].astype(str).str.replace('%', ''), errors='coerce')
-
             hand = PLAYER_HANDS.get(p_name, "右")
             is_right_hand = (hand == "右")
             
@@ -794,10 +782,8 @@ with tab1:
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
             else:
                 df_pos_source = df_base.copy() # 「両方」の場合は両方のソースを含める
-
             df_pos_source = standardize_pitch_types(df_pos_source)
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
-
             # --- 回転系・3D用データ (df_rot_source) ---
             if source_filter == "Rapsodoのみ":
                 df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
@@ -806,10 +792,8 @@ with tab1:
             else:
                 rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
                 df_rot_source = rap_chk.copy() if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
-
             df_rot_source = standardize_pitch_types(df_rot_source)
             df_rot_source = add_symbol_column(df_rot_source, is_right_hand)
-
             # チーム平均算出（位置系はTrackman基準のチーム平均）
             df_team_calc = df_all.copy()
             df_team_calc = standardize_pitch_types(df_team_calc)
@@ -834,7 +818,6 @@ with tab1:
                 team_display_rs = float(team_abs_rs if is_right_hand else -team_abs_rs)
             else:
                 team_avg_rh, team_display_rs = None, None
-
             if 'Pitch Type' in df_base.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
@@ -846,7 +829,6 @@ with tab1:
                 df_vra_summary = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")]
                 if c_vra in df_vra_summary.columns:
                     agg_dict[c_vra] = 'mean'
-
                 stats_df = df_base.groupby('Pitch Type').agg(agg_dict).reset_index()
                 stats_df.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in stats_df.columns]
                 
@@ -868,7 +850,6 @@ with tab1:
                 active_pitch_types = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist()) if not df_pos_source.empty else []
                 category_orders_dict = {"Pitch Type": active_pitch_types}
                 symbol_map_dict = {s: s for s in df_pos_source['Symbol'].unique()} if 'Symbol' in df_pos_source.columns else {}
-
                 # --- 📈 変化量マップ（Trackman基準） ---
                 st.divider()
                 st.subheader("📈 変化量マップ（Trackman基準）")
@@ -920,7 +901,6 @@ with tab1:
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
-
                 # --- 📍 リリース位置プロット ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
@@ -932,8 +912,19 @@ with tab1:
                     if 'Data Source' in df_pos_source.columns:
                         hover_items_rel.append('Data Source')
                         
-                    x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
-                    y_range = [1.0, 2.2]
+                    # データに基づいて動的な軸範囲を計算（見切れ防止）
+                    valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs])
+                    if not valid_rel_df.empty:
+                        min_x, max_x = valid_rel_df[c_rs].min(), valid_rel_df[c_rs].max()
+                        min_y, max_y = valid_rel_df[c_rh].min(), valid_rel_df[c_rh].max()
+                        if is_right_hand:
+                            x_range = [min(0.0, min_x - 0.1), max(1.2, max_x + 0.1)]
+                        else:
+                            x_range = [min(-1.2, min_x - 0.1), max(0.0, max_x + 0.1)]
+                        y_range = [min(1.0, min_y - 0.1), max(2.2, max_y + 0.1)]
+                    else:
+                        x_range = [0.0, 1.2] if is_right_hand else [-1.2, 0.0]
+                        y_range = [1.0, 2.2]
                     
                     common_release_layout = dict(
                         plot_bgcolor='white',
@@ -1010,7 +1001,6 @@ with tab1:
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(**common_release_layout)
                         st.plotly_chart(fig_rel_avg, use_container_width=True, key="chart_rel_avg")
-
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -1065,7 +1055,6 @@ with tab1:
                         layout_args_range['shapes'] = shapes_list
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
-
                     # --- 📍 月毎の平均リリース位置グラフ ---
                     st.write("▼ 月毎の平均リリース位置（投手目線 / 全球まとめた月毎の平均）")
                     df_rel_month = df_pos_source.dropna(subset=[c_rh, c_rs, 'Date']).copy()
@@ -1100,10 +1089,8 @@ with tab1:
                     fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
                     fig_rel_month.update_layout(**common_release_layout)
                     st.plotly_chart(fig_rel_month, use_container_width=True, key="chart_rel_month_avg")
-
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
-
                 # --- 📐 縦リリース角度（VertRelAngle）分析セクション ---
                 st.divider()
                 st.subheader("📐 縦リリース角度分析 (Vertical Release Angle)")
@@ -1164,7 +1151,6 @@ with tab1:
                         st.plotly_chart(fig_vra_avg, use_container_width=True, key="chart_vert_rel_angle_avg")
                 else:
                     st.info("ℹ️ 縦リリース角度（VertRelAngle）データが含まれていません。")
-
                 # --- 📏 エクステンション分析セクション ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
@@ -1241,7 +1227,6 @@ with tab1:
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
-
                     # --- 📏 月毎のエクステンション分析グラフ（2種類） ---
                     st.divider()
                     st.write("▼ 月毎のエクステンション推移グラフ（個別プロット ＆ 平均折れ線）")
@@ -1277,7 +1262,6 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                         )
                         st.plotly_chart(fig_ext_all_plot, use_container_width=True, key="chart_ext_all_plot")
-
                     with ext_sub_col2:
                         st.write("▼ 月毎の平均推移（平均プロットを線で繋いだグラフ）")
                         ext_month_avg = df_ext_trend.groupby('Month').agg({c_ext: 'mean'}).reset_index()
@@ -1297,10 +1281,8 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', title='月')
                         )
                         st.plotly_chart(fig_ext_line, use_container_width=True, key="chart_ext_line_avg")
-
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
-
                 # --- ⚾️ 3Dスピンビジュアライザー（Rapsodo回転データ参照） ---
                 st.divider()
                 st.subheader("⚾️ 3D軌道（Rapsodo回転データ参照）")
