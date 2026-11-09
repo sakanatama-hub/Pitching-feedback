@@ -63,6 +63,13 @@ SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitchin
 # 🖼️ エクステンション用横向きイラストのRaw URL
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
+# 表記ゆれ統一用辞書（Spritter -> Splitter を追加）
+REPLACE_PITCH_DICT = {
+    'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 
+    'Sinker': '2seam', 
+    'Spritter': 'Splitter', 'Split': 'Splitter', 'スプリット': 'Splitter'
+}
+
 def load_data_from_github(file_path):
     if not GITHUB_TOKEN:
         st.error("【設定エラー】StreamlitのSecretsにトークンが設定されていないか、読み込めていません。")
@@ -79,11 +86,10 @@ def load_data_from_github(file_path):
         df = pd.read_excel(io.BytesIO(file_res.content))
         
         # 球種の表記ゆれ・変換処理
-        replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
         if 'TaggedPitchType' in df.columns:
-            df['TaggedPitchType'] = df['TaggedPitchType'].replace(replace_dict)
+            df['TaggedPitchType'] = df['TaggedPitchType'].replace(REPLACE_PITCH_DICT)
         if 'Pitch Type' in df.columns:
-            df['Pitch Type'] = df['Pitch Type'].replace(replace_dict)
+            df['Pitch Type'] = df['Pitch Type'].replace(REPLACE_PITCH_DICT)
             
         return df
     else:
@@ -145,7 +151,7 @@ COLOR_MAP_PITCH = {
     "Curve": "#000080", "Curveball": "#000080", "CurveBall": "#000080", "CU": "#000080", "カーブ": "#000080",
     "Slider": "#FFD700", "SL": "#FFD700", "スライダー": "#FFD700", "Sweeper": "#8A2BE2", "スイーパー": "#8A2BE2",
     "Cutter": "#FF4500", "Cut": "#FF4500", "カット": "#FF4500", "カットボール": "#FF4500",
-    "Split": "#0066FF", "Splitter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
+    "Split": "#0066FF", "Splitter": "#0066FF", "Spritter": "#0066FF", "スプリット": "#0066FF", "フォーク": "#0066FF", "FS": "#0066FF",
     "Changeup": "#00A86B", "ChangeUp": "#00A86B", "CH": "#00A86B", "チェンジアップ": "#00A86B",
     "Sinker": "#FF1493", "2seam": "#FF1493", "TwoSeam": "#FF1493", "Two-Seam": "#FF1493", "Two seam": "#FF1493", "ツーシーム": "#FF1493"
 }
@@ -155,7 +161,7 @@ PITCH_ORDER_RANK = {
     "curve": 2, "curveball": 2, "cu": 2, "カーブ": 2,
     "slider": 3, "sl": 3, "スライダー": 3, "sweeper": 3, "スイーパー": 3,
     "cutter": 4, "cut": 4, "カット": 4, "カットボール": 4,
-    "split": 5, "splitter": 5, "スプリット": 5, "フォーク": 5, "fs": 5,
+    "split": 5, "splitter": 5, "spritter": 5, "スプリット": 5, "フォーク": 5, "fs": 5,
     "changeup": 6, "ch": 6, "チェンジアップ": 6,
     "sinker": 7, "2seam": 7, "si": 7, "シンカー": 7, "twoseam": 7, "two-seam": 7, "two seam": 7, "ツーシーム": 7
 }
@@ -207,8 +213,8 @@ def add_symbol_column(df, is_right_hand=True):
             symbols.append('triangle-up')   # カーブ: ▲
         elif any(k in pt_lower for k in ["changeup", "ch", "チェンジアップ"]):
             symbols.append('square')        # チェンジ: ▫️
-        elif any(k in pt_lower for k in ["split", "splitter", "フォーク", "fs"]):
-            symbols.append('triangle-down') # フォーク: 下向き三角
+        elif any(k in pt_lower for k in ["split", "splitter", "spritter", "フォーク", "fs"]):
+            symbols.append('triangle-down') # フォーク / スプリット: 下向き三角
         else:
             symbols.append('circle')
             
@@ -502,11 +508,10 @@ with tab2:
                     new_df['Data Type'] = data_type
                     new_df['Data Source'] = data_source
                     
-                    replace_dict = {'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 'Sinker': '2seam'}
                     if 'Pitch Type' in new_df.columns:
-                        new_df['Pitch Type'] = new_df['Pitch Type'].replace(replace_dict)
+                        new_df['Pitch Type'] = new_df['Pitch Type'].replace(REPLACE_PITCH_DICT)
                     if 'TaggedPitchType' in new_df.columns:
-                        new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(replace_dict)
+                        new_df['TaggedPitchType'] = new_df['TaggedPitchType'].replace(REPLACE_PITCH_DICT)
                     
                     cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
                     for c in cols_to_num:
