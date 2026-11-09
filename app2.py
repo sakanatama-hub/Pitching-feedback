@@ -63,11 +63,12 @@ SILHOUETTE_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitchin
 # 🖼️ エクステンション用横向きイラストのRaw URL
 EXTENSION_IMAGE_URL = "https://raw.githubusercontent.com/sakanatama-hub/Pitching-feedback/main/data/%E3%82%A8%E3%82%AF%E3%82%B9%E3%83%86%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3.webp"
 
-# 表記ゆれ・スプリット系完全統一用マッピング（大文字小文字対応）
+# 表記ゆれ・スプリット系完全統一用マッピング（大文字小文字対応 ＆ FBなどの追加）
 REPLACE_PITCH_DICT = {
     'CurveBall': 'Curveball', 'Curve ball': 'Curveball', 
     'Sinker': '2seam', 
-    'Spritter': 'Splitter', 'spritter': 'Splitter', 'Split': 'Splitter', 'splitter': 'Splitter', 'スプリット': 'Splitter'
+    'Spritter': 'Splitter', 'spritter': 'Splitter', 'Split': 'Splitter', 'splitter': 'Splitter', 'スプリット': 'Splitter',
+    'FB': 'Straight', 'Fastball': 'Straight', 'fastball': 'Straight', 'ストレート': 'Straight'
 }
 
 def standardize_pitch_types(df):
@@ -75,13 +76,15 @@ def standardize_pitch_types(df):
     if df.empty:
         return df
     
-    # 部分一致や大文字小文字のゆれも含めてSplitterに統一するための正規化
     for col in ['Pitch Type', 'TaggedPitchType']:
         if col in df.columns:
             df[col] = df[col].replace(REPLACE_PITCH_DICT)
-            # 文字列としてスプリット系が含まれるものを強制置換
-            mask = df[col].astype(str).str.lower().isin(['spritter', 'split', 'スプリット'])
-            df.loc[mask, col] = 'Splitter'
+            # 部分一致や別表記の強制置換
+            mask_split = df[col].astype(str).str.lower().isin(['spritter', 'split', 'スプリット'])
+            df.loc[mask_split, col] = 'Splitter'
+            
+            mask_straight = df[col].astype(str).str.lower().isin(['fb', 'fastball', 'ストレート'])
+            df.loc[mask_straight, col] = 'Straight'
     return df
 
 def load_data_from_github(file_path):
@@ -212,7 +215,7 @@ def add_symbol_column(df, is_right_hand=True):
             symbols.append('circle')
             continue
         pt_lower = str(pt).strip().lower()
-        if any(k in pt_lower for k in ["straight", "fastball", "ストレート", "四縫線", "4-seam", "four-seam"]):
+        if any(k in pt_lower for k in ["straight", "fastball", "ストレート", "四縫線", "4-seam", "four-seam", "fb"]):
             symbols.append('circle')        # ストレート: 丸
         elif any(k in pt_lower for k in ["sinker", "2seam", "twoseam", "two-seam", "two seam", "ツーシーム"]):
             symbols.append('star')          # ツーシーム: 星
@@ -790,7 +793,7 @@ with tab1:
             elif source_filter == "Rapsodoのみ":
                 df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
             else:
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
+                df_pos_source = df_base.copy() # 「両方」の場合は両方のソースを含める
 
             df_pos_source = standardize_pitch_types(df_pos_source)
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
@@ -918,9 +921,9 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
 
-                # --- 📍 リリース位置プロット（Trackman基準） ---
+                # --- 📍 リリース位置プロット ---
                 st.divider()
-                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手 / Trackman基準）")
+                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
                 
                 if c_rh in df_pos_source.columns and c_rs in df_pos_source.columns and not df_pos_source[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2, rel_col3 = st.columns(3)
@@ -1101,11 +1104,11 @@ with tab1:
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
 
-                # --- 📐 縦リリース角度（VertRelAngle）分析セクション（トラックマン基準） ---
+                # --- 📐 縦リリース角度（VertRelAngle）分析セクション ---
                 st.divider()
-                st.subheader("📐 縦リリース角度分析 (Vertical Release Angle / トラックマン基準)")
+                st.subheader("📐 縦リリース角度分析 (Vertical Release Angle)")
                 
-                df_vra_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
+                df_vra_source = df_base.copy()
                 
                 if c_vra in df_vra_source.columns and not df_vra_source[c_vra].dropna().empty:
                     ang_col1, ang_col2 = st.columns(2)
@@ -1160,7 +1163,7 @@ with tab1:
                         )
                         st.plotly_chart(fig_vra_avg, use_container_width=True, key="chart_vert_rel_angle_avg")
                 else:
-                    st.info("ℹ️ トラックマンの縦リリース角度（VertRelAngle）データが含まれていません。")
+                    st.info("ℹ️ 縦リリース角度（VertRelAngle）データが含まれていません。")
 
                 # --- 📏 エクステンション分析セクション ---
                 st.divider()
