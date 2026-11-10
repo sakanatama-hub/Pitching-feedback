@@ -147,7 +147,6 @@ if 'pitch_df' not in st.session_state:
     with st.spinner("GitHubから最新の投球データを読み込み中..."):
         st.session_state['pitch_df'] = load_data_from_github(GITHUB_PITCH_FILE_PATH)
 
-# アップロード中のロック状態管理
 if 'is_uploading' not in st.session_state:
     st.session_state['is_uploading'] = False
 
@@ -207,7 +206,7 @@ def add_symbol_column(df, is_right_hand=True):
         return df
     
     symbols = []
-    cut_sym = 'triangle-left' if is_right_hand else 'triangle-right' # 右投手: ◀︎, 左投手: ▶︎
+    cut_sym = 'triangle-left' if is_right_hand else 'triangle-right'
     
     for pt in df['Pitch Type']:
         if pd.isna(pt):
@@ -215,19 +214,19 @@ def add_symbol_column(df, is_right_hand=True):
             continue
         pt_lower = str(pt).strip().lower()
         if any(k in pt_lower for k in ["fastball", "straight", "ストレート", "四縫線", "4-seam", "four-seam", "fb"]):
-            symbols.append('circle')        # ファストボール: 丸
+            symbols.append('circle')
         elif any(k in pt_lower for k in ["sinker", "2seam", "twoseam", "two-seam", "two seam", "ツーシーム"]):
-            symbols.append('star')          # ツーシーム: 星
+            symbols.append('star')
         elif any(k in pt_lower for k in ["slider", "sl", "スライダー", "sweeper", "スイーパー"]):
-            symbols.append('diamond')       # スライダー: ◆
+            symbols.append('diamond')
         elif any(k in pt_lower for k in ["cutter", "cut", "カット"]):
-            symbols.append(cut_sym)         # カット: ◀︎ / ▶︎
+            symbols.append(cut_sym)
         elif any(k in pt_lower for k in ["curve", "cu", "カーブ"]):
-            symbols.append('triangle-up')   # カーブ: ▲
+            symbols.append('triangle-up')
         elif any(k in pt_lower for k in ["changeup", "ch", "チェンジアップ"]):
-            symbols.append('square')        # チェンジ: ▫️
+            symbols.append('square')
         elif any(k in pt_lower for k in ["split", "splitter", "spritter", "フォーク", "fs"]):
-            symbols.append('triangle-down') # フォーク / スプリット: 下向き三角
+            symbols.append('triangle-down')
         else:
             symbols.append('circle')
             
@@ -270,15 +269,14 @@ def time_to_degrees(time_str):
         return 0.0
 
 def extract_date_from_filename(filename):
-    """ファイル名から日付（YYYY-MM-DD）を自動抽出する関数 (26.02.08 などの下二桁年.月.日形式に対応)"""
     match_yy = re.search(r'(\d{2})[./-](\d{1,2})[./-](\d{1,2})', filename)
     if match_yy:
         yy, m, d = match_yy.groups()
         try:
-            full_year = 2000 + int(yy)
-            return date(full_year, int(m), int(d)).strftime('%Y-%m-%d')
+            return date(2000 + int(yy), int(m), int(d)).strftime('%Y-%m-%d')
         except:
             pass
+
     match_hyphen = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', filename)
     if match_hyphen:
         y, m, d = match_hyphen.groups()
@@ -302,10 +300,12 @@ def get_processed_silhouette_b64(is_right_handed=True):
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
     try:
         r = requests.get(SILHOUETTE_IMAGE_URL, headers=headers, timeout=5)
         if r.status_code != 200:
             return None
+
         img = Image.open(io.BytesIO(r.content)).convert("RGBA")
         datas = img.getdata()
         newData = []
@@ -330,10 +330,12 @@ def get_processed_extension_silhouette_b64():
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
     try:
         r = requests.get(EXTENSION_IMAGE_URL, headers=headers, timeout=5)
         if r.status_code != 200:
             return None
+
         img = Image.open(io.BytesIO(r.content)).convert("RGBA")
         datas = img.getdata()
         newData = []
@@ -353,48 +355,16 @@ def get_processed_extension_silhouette_b64():
 def add_pitcher_url_background(fig, is_right_handed=True):
     img_src = get_processed_silhouette_b64(is_right_handed)
     if img_src:
-        if is_right_handed:
-            x_min, x_max = -0.42, 0.98
-        else:
-            x_min, x_max = -0.98, 0.42
-            
+        x_min, x_max = (-0.42, 0.98) if is_right_handed else (-0.98, 0.42)
         y_min, y_max = -0.88, 1.72
-        fig.add_layout_image(
-            dict(
-                source=img_src,
-                xref="x",
-                yref="y",
-                x=x_min,
-                y=y_max,
-                sizex=abs(x_max - x_min),
-                sizey=abs(y_max - y_min),
-                sizing="stretch",
-                opacity=0.45,
-                layer="below"
-            )
-        )
+        fig.add_layout_image(dict(source=img_src, xref="x", yref="y", x=x_min, y=y_max, sizex=abs(x_max - x_min), sizey=abs(y_max - y_min), sizing="stretch", opacity=0.45, layer="below"))
 
 def add_extension_url_background(fig):
     img_src = get_processed_extension_silhouette_b64()
     if img_src:
-        fig.add_layout_image(
-            dict(
-                source=img_src,
-                xref="x",
-                yref="y",
-                x=-0.12,
-                y=2.05,
-                sizex=2.15,
-                sizey=2.05,
-                xanchor="left",
-                yanchor="top",
-                sizing="stretch",
-                opacity=0.40,
-                layer="below"
-            )
-        )
+        fig.add_layout_image(dict(source=img_src, xref="x", yref="y", x=-0.12, y=2.05, sizex=2.15, sizey=2.05, xanchor="left", yanchor="top", sizing="stretch", opacity=0.40, layer="below"))
 
-# --- タブ構造の定義 ---
+# --- タブ構造 ---
 tab1, tab2 = st.tabs(["📊 分析フィードバック", "📥 投手データ登録・削除"])
 
 # ==========================================
@@ -775,15 +745,11 @@ with tab1:
             c_dir, c_rev, c_eff, c_vb, c_hb, c_vel, c_rh, c_rs, c_ext = 'Spin Direction', 'Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension'
             c_vra = 'VertRelAngle'
             
-            # --- 変化量・リリース用データ (df_pos_source) ---
-            if source_filter == "Trackmanのみ":
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
-            elif source_filter == "Rapsodoのみ":
-                df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
-            else:
-                df_pos_source = df_base.copy() # 「両方」の場合は両方のソースを含める
+            # --- 変化量・リリース用データ (常にトラックマンデータのみに固定) ---
+            df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             df_pos_source = standardize_pitch_types(df_pos_source)
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
+            
             # --- 回転系・3D用データ (df_rot_source) ---
             if source_filter == "Rapsodoのみ":
                 df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
@@ -794,6 +760,7 @@ with tab1:
                 df_rot_source = rap_chk.copy() if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             df_rot_source = standardize_pitch_types(df_rot_source)
             df_rot_source = add_symbol_column(df_rot_source, is_right_hand)
+            
             # チーム平均算出（位置系はTrackman基準のチーム平均）
             df_team_calc = df_all.copy()
             df_team_calc = standardize_pitch_types(df_team_calc)
@@ -818,6 +785,7 @@ with tab1:
                 team_display_rs = float(team_abs_rs if is_right_hand else -team_abs_rs)
             else:
                 team_avg_rh, team_display_rs = None, None
+                
             if 'Pitch Type' in df_base.columns:
                 st.subheader(f"📊 平均データサマリー ({start_date} ～ {end_date} / {view_type} / {source_filter})")
                 
@@ -850,7 +818,8 @@ with tab1:
                 active_pitch_types = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist()) if not df_pos_source.empty else []
                 category_orders_dict = {"Pitch Type": active_pitch_types}
                 symbol_map_dict = {s: s for s in df_pos_source['Symbol'].unique()} if 'Symbol' in df_pos_source.columns else {}
-                # --- 📈 変化量マップ（Trackman基準） ---
+                
+                # --- 📈 変化量マップ（Trackman基準・限定） ---
                 st.divider()
                 st.subheader("📈 変化量マップ（Trackman基準）")
                 plot_col1, plot_col2 = st.columns(2)
@@ -878,6 +847,7 @@ with tab1:
                     fig_all.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_all.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_all, use_container_width=False, key="chart_hb_vb_all")
+                    
                 with plot_col2:
                     st.write("▼ 球種別平均プロット")
                     pos_stats = df_pos_source.groupby('Pitch Type').agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
@@ -901,9 +871,10 @@ with tab1:
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
-                # --- 📍 リリース位置プロット ---
+                    
+                # --- 📍 リリース位置プロット（Trackman基準・限定） ---
                 st.divider()
-                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手）")
+                st.subheader(f"📍 リリース位置（投手目線 / {hand}投手・Trackmanデータのみ）")
                 
                 if c_rh in df_pos_source.columns and c_rs in df_pos_source.columns and not df_pos_source[[c_rh, c_rs]].dropna().empty:
                     rel_col1, rel_col2, rel_col3 = st.columns(3)
@@ -912,7 +883,6 @@ with tab1:
                     if 'Data Source' in df_pos_source.columns:
                         hover_items_rel.append('Data Source')
                         
-                    # データに基づいて動的な軸範囲を計算（見切れ防止）
                     valid_rel_df = df_pos_source.dropna(subset=[c_rh, c_rs])
                     if not valid_rel_df.empty:
                         min_x, max_x = valid_rel_df[c_rs].min(), valid_rel_df[c_rs].max()
@@ -1001,6 +971,7 @@ with tab1:
                         fig_rel_avg.add_vline(x=0, line_dash="dash", line_color="gray")
                         fig_rel_avg.update_layout(**common_release_layout)
                         st.plotly_chart(fig_rel_avg, use_container_width=True, key="chart_rel_avg")
+                        
                     with rel_col3:
                         st.write("▼ 球種別リリース範囲")
                         fig_rel_range = go.Figure()
@@ -1055,6 +1026,7 @@ with tab1:
                         layout_args_range['shapes'] = shapes_list
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
+                        
                     # --- 📍 月毎の平均リリース位置グラフ ---
                     st.write("▼ 月毎の平均リリース位置（投手目線 / 全球まとめた月毎の平均）")
                     df_rel_month = df_pos_source.dropna(subset=[c_rh, c_rs, 'Date']).copy()
@@ -1091,6 +1063,7 @@ with tab1:
                     st.plotly_chart(fig_rel_month, use_container_width=True, key="chart_rel_month_avg")
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
+                    
                 # --- 📐 縦リリース角度（VertRelAngle）分析セクション ---
                 st.divider()
                 st.subheader("📐 縦リリース角度分析 (Vertical Release Angle)")
@@ -1151,6 +1124,7 @@ with tab1:
                         st.plotly_chart(fig_vra_avg, use_container_width=True, key="chart_vert_rel_angle_avg")
                 else:
                     st.info("ℹ️ 縦リリース角度（VertRelAngle）データが含まれていません。")
+                    
                 # --- 📏 エクステンション分析セクション ---
                 st.divider()
                 st.subheader("📏 エクステンション分析（プレートからの距離 ＆ リリース高さ）")
@@ -1227,6 +1201,7 @@ with tab1:
                             yaxis=dict(gridcolor='lightgray', dtick=0.5, range=ext_y_range, title='高さ [m]')
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
+                        
                     # --- 📏 月毎のエクステンション分析グラフ（2種類） ---
                     st.divider()
                     st.write("▼ 月毎のエクステンション推移グラフ（個別プロット ＆ 平均折れ線）")
@@ -1262,6 +1237,7 @@ with tab1:
                             xaxis=dict(gridcolor='lightgray', title='投球数 (球目)')
                         )
                         st.plotly_chart(fig_ext_all_plot, use_container_width=True, key="chart_ext_all_plot")
+                        
                     with ext_sub_col2:
                         st.write("▼ 月毎の平均推移（平均プロットを線で繋いだグラフ）")
                         ext_month_avg = df_ext_trend.groupby('Month').agg({c_ext: 'mean'}).reset_index()
@@ -1283,6 +1259,7 @@ with tab1:
                         st.plotly_chart(fig_ext_line, use_container_width=True, key="chart_ext_line_avg")
                 else:
                     st.info("ℹ️ エクステンションデータが存在しません。")
+                    
                 # --- ⚾️ 3Dスピンビジュアライザー（Rapsodo回転データ参照） ---
                 st.divider()
                 st.subheader("⚾️ 3D軌道（Rapsodo回転データ参照）")
