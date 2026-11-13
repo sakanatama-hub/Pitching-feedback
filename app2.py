@@ -750,6 +750,15 @@ with tab1:
             df_pos_source = standardize_pitch_types(df_pos_source)
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
             
+            # --- 共通の月ごとのカラーマップ定義（全グラフで統一） ---
+            if 'Date' in df_pos_source.columns and not df_pos_source['Date'].dropna().empty:
+                all_months = sorted(df_pos_source['Date'].apply(lambda d: pd.to_datetime(d).strftime('%Y-%m')).unique().tolist())
+            else:
+                all_months = []
+            
+            color_palette = px.colors.qualitative.Plotly
+            month_color_map = {m: color_palette[i % len(color_palette)] for i, m in enumerate(all_months)}
+
             # --- 回転系・3D用データ (df_rot_source) ---
             if source_filter == "Rapsodoのみ":
                 df_rot_source = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")].copy()
@@ -872,7 +881,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
                 
-                # --- 📈 月別の変化量平均マップ（球種選択可能・文字なし仕様） ---
+                # --- 📈 月別の変化量平均マップ（球種選択可能・統一カラーマップ適用） ---
                 st.divider()
                 st.subheader("📈 月別の変化量平均マップ（Trackman基準 / 球種選択可能）")
                 
@@ -887,7 +896,7 @@ with tab1:
                 if selected_month_pts:
                     df_month_vb = df_pos_source[df_pos_source['Pitch Type'].isin(selected_month_pts)].dropna(subset=[c_hb, c_vb, 'Date']).copy()
                     if not df_month_vb.empty:
-                        df_month_vb['Month'] = pd.to_datetime(df_month_vb['Date']).dt.to_period('M').astype(str)
+                        df_month_vb['Month'] = pd.to_datetime(df_month_vb['Date']).dt.strftime('%Y-%m')
                         month_vb_stats = df_month_vb.groupby(['Month', 'Pitch Type']).agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
                         
                         fig_month_vb = px.scatter(
@@ -899,9 +908,9 @@ with tab1:
                             range_x=[-60, 60],
                             range_y=[-60, 60],
                             labels={c_hb: '横変化量 HB [cm]', c_vb: '縦変化量 VB [cm]', 'Month': '月', 'Pitch Type': '球種'},
+                            color_discrete_map=month_color_map,
                             hover_data=['Month', 'Pitch Type', c_hb, c_vb]
                         )
-                        # プロット上の文字（月名）を削除し、見やすさを最優先
                         fig_month_vb.update_traces(marker=dict(size=14))
                         fig_month_vb.add_hline(y=0, line_dash="dash", line_color="black")
                         fig_month_vb.add_vline(x=0, line_dash="dash", line_color="black")
@@ -1073,7 +1082,7 @@ with tab1:
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
                         
-                    # --- 📍 月毎の平均リリース位置グラフ（球種選択可能・文字なし仕様） ---
+                    # --- 📍 月毎の平均リリース位置グラフ（球種選択可能・統一カラーマップ適用） ---
                     st.write("▼ 月毎の平均リリース位置（投手目線 / 球種選択可能）")
                     
                     selected_month_rel_pts = st.multiselect(
@@ -1086,7 +1095,7 @@ with tab1:
                     if selected_month_rel_pts:
                         df_rel_month = df_pos_source[df_pos_source['Pitch Type'].isin(selected_month_rel_pts)].dropna(subset=[c_rh, c_rs, 'Date']).copy()
                         if not df_rel_month.empty:
-                            df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.to_period('M').astype(str)
+                            df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.strftime('%Y-%m')
                             rel_month_avg = df_rel_month.groupby(['Month', 'Pitch Type']).agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
                             
                             fig_rel_month = px.scatter(
@@ -1096,7 +1105,7 @@ with tab1:
                                 color='Month',
                                 symbol='Pitch Type',
                                 labels={c_rs: '左右 [m]', c_rh: '高さ [m]', 'Month': '月', 'Pitch Type': '球種'},
-                                color_discrete_map=COLOR_MAP_PITCH,
+                                color_discrete_map=month_color_map,
                                 hover_data=['Month', 'Pitch Type']
                             )
                             add_pitcher_url_background(fig_rel_month, is_right_hand)
@@ -1112,7 +1121,6 @@ with tab1:
                                     hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                                 ))
                             
-                            # プロット上の文字（月名）を削除
                             fig_rel_month.update_traces(marker=dict(size=16))
                             fig_rel_month.add_hline(y=0, line_width=2, line_color="black")
                             fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
@@ -1263,12 +1271,12 @@ with tab1:
                         )
                         st.plotly_chart(fig_ext_avg, use_container_width=True, key="chart_ext_avg")
                         
-                    # --- 📏 月毎のエクステンション分析グラフ（2種類） ---
+                    # --- 📏 月毎のエクステンション分析グラフ（2種類・統一カラーマップ適用） ---
                     st.divider()
                     st.write("▼ 月毎のエクステンション推移グラフ（個別プロット ＆ 平均折れ線）")
                     
                     df_ext_trend = df_pos_source.dropna(subset=[c_ext, 'Date']).copy()
-                    df_ext_trend['Month'] = pd.to_datetime(df_ext_trend['Date']).dt.to_period('M').astype(str)
+                    df_ext_trend['Month'] = pd.to_datetime(df_ext_trend['Date']).dt.strftime('%Y-%m')
                     df_ext_trend = df_ext_trend.sort_values('Date').reset_index(drop=True)
                     df_ext_trend['Pitch_Index'] = df_ext_trend.index + 1
                     
@@ -1282,6 +1290,7 @@ with tab1:
                             y=c_ext,
                             color='Month',
                             labels={'Pitch_Index': '投球数 (球目)', c_ext: 'エクステンション [m]', 'Month': '月'},
+                            color_discrete_map=month_color_map,
                             hover_data=['Date', c_vel, 'Pitch Type']
                         )
                         fig_ext_all_plot.add_trace(go.Scatter(
