@@ -871,7 +871,54 @@ with tab1:
                     fig_avg.add_vline(x=0, line_dash="dash", line_color="black")
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
-                    
+                
+                # --- 📈 新規追加：月別の変化量平均マップ（球種選択可能） ---
+                st.divider()
+                st.subheader("📈 月別の変化量平均マップ（Trackman基準 / 球種選択可能）")
+                
+                all_pts_month = sort_pitch_types(df_pos_source['Pitch Type'].dropna().unique().tolist())
+                selected_month_pts = st.multiselect(
+                    "月別変化量グラフに表示する球種を選択してください（複数選択可）", 
+                    options=all_pts_month, 
+                    default=all_pts_month, 
+                    key="month_vb_pitch_selector"
+                )
+                
+                if selected_month_pts:
+                    df_month_vb = df_pos_source[df_pos_source['Pitch Type'].isin(selected_month_pts)].dropna(subset=[c_hb, c_vb, 'Date']).copy()
+                    if not df_month_vb.empty:
+                        df_month_vb['Month'] = pd.to_datetime(df_month_vb['Date']).dt.to_period('M').astype(str)
+                        month_vb_stats = df_month_vb.groupby(['Month', 'Pitch Type']).agg({c_hb: 'mean', c_vb: 'mean'}).reset_index()
+                        
+                        fig_month_vb = px.scatter(
+                            month_vb_stats,
+                            x=c_hb,
+                            y=c_vb,
+                            color='Pitch Type',
+                            text='Month',
+                            range_x=[-60, 60],
+                            range_y=[-60, 60],
+                            labels={c_hb: '横変化量 HB [cm]', c_vb: '縦変化量 VB [cm]', 'Month': '月'},
+                            color_discrete_map=COLOR_MAP_PITCH,
+                            category_orders={"Pitch Type": active_pitch_types},
+                            hover_data=['Month', 'Pitch Type', c_hb, c_vb]
+                        )
+                        fig_month_vb.update_traces(textposition='top center', marker=dict(size=14))
+                        fig_month_vb.add_hline(y=0, line_dash="dash", line_color="black")
+                        fig_month_vb.add_vline(x=0, line_dash="dash", line_color="black")
+                        fig_month_vb.update_layout(
+                            plot_bgcolor='white', 
+                            width=600, 
+                            height=600, 
+                            yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray', title='縦変化量 VB [cm]'), 
+                            xaxis=dict(gridcolor='lightgray', title='横変化量 HB [cm]')
+                        )
+                        st.plotly_chart(fig_month_vb, use_container_width=False, key="chart_month_vb_avg_map")
+                    else:
+                        st.info("選択された条件に一致するデータがありません。")
+                else:
+                    st.info("💡 表示する球種を上のボックスから1つ以上選択してください。")
+
                 # --- 📍 リリース位置プロット（Trackman基準・限定） ---
                 st.divider()
                 st.subheader(f"📍 リリース位置（投手目線 / {hand}投手・Trackmanデータのみ）")
@@ -1027,40 +1074,55 @@ with tab1:
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
                         
-                    # --- 📍 月毎の平均リリース位置グラフ ---
-                    st.write("▼ 月毎の平均リリース位置（投手目線 / 全球まとめた月毎の平均）")
-                    df_rel_month = df_pos_source.dropna(subset=[c_rh, c_rs, 'Date']).copy()
-                    df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.to_period('M').astype(str)
+                    # --- 📍 月毎の平均リリース位置グラフ（球種選択可能） ---
+                    st.write("▼ 月毎の平均リリース位置（投手目線 / 球種選択可能）")
                     
-                    rel_month_avg = df_rel_month.groupby('Month').agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
-                    
-                    fig_rel_month = px.scatter(
-                        rel_month_avg,
-                        x=c_rs,
-                        y=c_rh,
-                        color='Month',
-                        text='Month',
-                        labels={c_rs: '左右 [m]', c_rh: '高さ [m]', 'Month': '月'},
-                        hover_data=['Month']
+                    selected_month_rel_pts = st.multiselect(
+                        "月別リリース位置グラフに表示する球種を選択してください（複数選択可）", 
+                        options=all_pts_month, 
+                        default=all_pts_month, 
+                        key="month_rel_pitch_selector"
                     )
-                    add_pitcher_url_background(fig_rel_month, is_right_hand)
                     
-                    if team_display_rs is not None and team_avg_rh is not None:
-                        fig_rel_month.add_trace(go.Scatter(
-                            x=[team_display_rs],
-                            y=[team_avg_rh],
-                            mode='markers',
-                            name='チーム平均',
-                            marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
-                            hoverinfo='text',
-                            hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
-                        ))
-                    
-                    fig_rel_month.update_traces(textposition='top center', marker=dict(size=16))
-                    fig_rel_month.add_hline(y=0, line_width=2, line_color="black")
-                    fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
-                    fig_rel_month.update_layout(**common_release_layout)
-                    st.plotly_chart(fig_rel_month, use_container_width=True, key="chart_rel_month_avg")
+                    if selected_month_rel_pts:
+                        df_rel_month = df_pos_source[df_pos_source['Pitch Type'].isin(selected_month_rel_pts)].dropna(subset=[c_rh, c_rs, 'Date']).copy()
+                        if not df_rel_month.empty:
+                            df_rel_month['Month'] = pd.to_datetime(df_rel_month['Date']).dt.to_period('M').astype(str)
+                            rel_month_avg = df_rel_month.groupby(['Month', 'Pitch Type']).agg({c_rs: 'mean', c_rh: 'mean'}).reset_index()
+                            
+                            fig_rel_month = px.scatter(
+                                rel_month_avg,
+                                x=c_rs,
+                                y=c_rh,
+                                color='Month',
+                                symbol='Pitch Type',
+                                text='Month',
+                                labels={c_rs: '左右 [m]', c_rh: '高さ [m]', 'Month': '月', 'Pitch Type': '球種'},
+                                color_discrete_map=COLOR_MAP_PITCH,
+                                hover_data=['Month', 'Pitch Type']
+                            )
+                            add_pitcher_url_background(fig_rel_month, is_right_hand)
+                            
+                            if team_display_rs is not None and team_avg_rh is not None:
+                                fig_rel_month.add_trace(go.Scatter(
+                                    x=[team_display_rs],
+                                    y=[team_avg_rh],
+                                    mode='markers',
+                                    name='チーム平均',
+                                    marker=dict(size=18, color='black', symbol='star', line=dict(width=1, color='white')),
+                                    hoverinfo='text',
+                                    hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
+                                ))
+                            
+                            fig_rel_month.update_traces(textposition='top center', marker=dict(size=16))
+                            fig_rel_month.add_hline(y=0, line_width=2, line_color="black")
+                            fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
+                            fig_rel_month.update_layout(**common_release_layout)
+                            st.plotly_chart(fig_rel_month, use_container_width=True, key="chart_rel_month_avg")
+                        else:
+                            st.info("選択された条件に一致するリリースデータがありません。")
+                    else:
+                        st.info("💡 月別リリース位置に表示する球種を選択してください。")
                 else:
                     st.info("ℹ️ リリース位置データが含まれていないか、有効な数値データが存在しません。")
                     
