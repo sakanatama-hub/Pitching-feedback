@@ -872,7 +872,7 @@ with tab1:
                     fig_avg.update_layout(plot_bgcolor='white', width=550, height=550, yaxis=dict(scaleanchor="x", scaleratio=1, gridcolor='lightgray'), xaxis=dict(gridcolor='lightgray'))
                     st.plotly_chart(fig_avg, use_container_width=False, key="chart_hb_vb_avg")
                 
-                # --- 📈 月別の変化量平均マップ（球種選択可能・月別色分け＆黒文字対応） ---
+                # --- 📈 月別の変化量平均マップ（球種選択可能・文字なし仕様） ---
                 st.divider()
                 st.subheader("📈 月別の変化量平均マップ（Trackman基準 / 球種選択可能）")
                 
@@ -894,20 +894,15 @@ with tab1:
                             month_vb_stats,
                             x=c_hb,
                             y=c_vb,
-                            color='Month',          # 変更: 月ごとに色を分ける
-                            symbol='Pitch Type',    # 追加: 球種ごとに形状を分ける
-                            text='Month',
+                            color='Month',
+                            symbol='Pitch Type',
                             range_x=[-60, 60],
                             range_y=[-60, 60],
                             labels={c_hb: '横変化量 HB [cm]', c_vb: '縦変化量 VB [cm]', 'Month': '月', 'Pitch Type': '球種'},
                             hover_data=['Month', 'Pitch Type', c_hb, c_vb]
                         )
-                        # 追加: 文字色を黒に指定し、白背景でもはっきりと読めるようにする
-                        fig_month_vb.update_traces(
-                            textfont=dict(color='black', size=12),
-                            textposition='top center', 
-                            marker=dict(size=14)
-                        )
+                        # プロット上の文字（月名）を削除し、見やすさを最優先
+                        fig_month_vb.update_traces(marker=dict(size=14))
                         fig_month_vb.add_hline(y=0, line_dash="dash", line_color="black")
                         fig_month_vb.add_vline(x=0, line_dash="dash", line_color="black")
                         fig_month_vb.update_layout(
@@ -1078,7 +1073,7 @@ with tab1:
                         fig_rel_range.update_layout(**layout_args_range)
                         st.plotly_chart(fig_rel_range, use_container_width=True, key="chart_rel_range")
                         
-                    # --- 📍 月毎の平均リリース位置グラフ（球種選択可能＆黒文字対応） ---
+                    # --- 📍 月毎の平均リリース位置グラフ（球種選択可能・文字なし仕様） ---
                     st.write("▼ 月毎の平均リリース位置（投手目線 / 球種選択可能）")
                     
                     selected_month_rel_pts = st.multiselect(
@@ -1100,7 +1095,6 @@ with tab1:
                                 y=c_rh,
                                 color='Month',
                                 symbol='Pitch Type',
-                                text='Month',
                                 labels={c_rs: '左右 [m]', c_rh: '高さ [m]', 'Month': '月', 'Pitch Type': '球種'},
                                 color_discrete_map=COLOR_MAP_PITCH,
                                 hover_data=['Month', 'Pitch Type']
@@ -1118,12 +1112,8 @@ with tab1:
                                     hovertext=f"チーム平均<br>高さ: {team_avg_rh:.2f}m<br>左右: {team_display_rs:.2f}m"
                                 ))
                             
-                            # 追加: 文字色を黒に指定し、白背景で見えるようにする
-                            fig_rel_month.update_traces(
-                                textfont=dict(color='black', size=12),
-                                textposition='top center', 
-                                marker=dict(size=16)
-                            )
+                            # プロット上の文字（月名）を削除
+                            fig_rel_month.update_traces(marker=dict(size=16))
                             fig_rel_month.add_hline(y=0, line_width=2, line_color="black")
                             fig_rel_month.add_vline(x=0, line_dash="dash", line_color="gray")
                             fig_rel_month.update_layout(**common_release_layout)
