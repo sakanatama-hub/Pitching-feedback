@@ -660,6 +660,17 @@ with tab1:
             p_name = st.selectbox("分析する選手", available_players, key="pitch_view_p")
         
         df_player = df_all[df_all['Player Name'] == p_name].copy()
+        
+        # 加藤選手の場合、Slider系をSweeperに完全統一
+        if "加藤" in str(p_name):
+            for col in ['Pitch Type', 'TaggedPitchType']:
+                if col in df_player.columns:
+                    df_player[col] = df_player[col].replace({
+                        'Slider': 'Sweeper', 'slider': 'Sweeper', 
+                        'SL': 'Sweeper', 'sl': 'Sweeper', 
+                        'スライダー': 'Sweeper'
+                    })
+
         df_player['Date'] = pd.to_datetime(df_player['Date']).dt.date
         
         today = date.today()
@@ -731,6 +742,17 @@ with tab1:
             
         if not df_base.empty:
             df_base = standardize_pitch_types(df_base)
+            
+            # 再度念のため加藤選手の場合の置換を確実に適用
+            if "加藤" in str(p_name):
+                for col in ['Pitch Type', 'TaggedPitchType']:
+                    if col in df_base.columns:
+                        df_base[col] = df_base[col].replace({
+                            'Slider': 'Sweeper', 'slider': 'Sweeper', 
+                            'SL': 'Sweeper', 'sl': 'Sweeper', 
+                            'スライダー': 'Sweeper'
+                        })
+
             df_base['ID'] = df_base.index
             cols_to_num = ['Spin Rate', 'Spin Efficiency', 'VB', 'HB', 'Velocity', 'RelHeight', 'RelSide', 'Extension', 'VertRelAngle']
             for c in cols_to_num:
@@ -748,6 +770,14 @@ with tab1:
             # --- 変化量・リリース用データ (常にトラックマンデータのみに固定) ---
             df_pos_source = df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             df_pos_source = standardize_pitch_types(df_pos_source)
+            if "加藤" in str(p_name):
+                for col in ['Pitch Type', 'TaggedPitchType']:
+                    if col in df_pos_source.columns:
+                        df_pos_source[col] = df_pos_source[col].replace({
+                            'Slider': 'Sweeper', 'slider': 'Sweeper', 
+                            'SL': 'Sweeper', 'sl': 'Sweeper', 
+                            'スライダー': 'Sweeper'
+                        })
             df_pos_source = add_symbol_column(df_pos_source, is_right_hand)
             
             # --- 共通の月ごとのカラーマップ定義（全グラフで統一） ---
@@ -768,6 +798,14 @@ with tab1:
                 rap_chk = df_base[df_base['Data Source'].astype(str).str.contains("Rapsodo")]
                 df_rot_source = rap_chk.copy() if not rap_chk.empty else df_base[df_base['Data Source'].astype(str).str.contains("Trackman")].copy()
             df_rot_source = standardize_pitch_types(df_rot_source)
+            if "加藤" in str(p_name):
+                for col in ['Pitch Type', 'TaggedPitchType']:
+                    if col in df_rot_source.columns:
+                        df_rot_source[col] = df_rot_source[col].replace({
+                            'Slider': 'Sweeper', 'slider': 'Sweeper', 
+                            'SL': 'Sweeper', 'sl': 'Sweeper', 
+                            'スライダー': 'Sweeper'
+                        })
             df_rot_source = add_symbol_column(df_rot_source, is_right_hand)
             
             # チーム平均算出（位置系はTrackman基準のチーム平均）
